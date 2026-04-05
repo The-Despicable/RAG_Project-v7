@@ -981,7 +981,7 @@
       </div>
       <div class="api-key-row">
         <span class="api-key-label">URL</span>
-        <input type="text" class="api-key-input" id="ollamaUrl" value="http://localhost:11434" />
+        <input type="text" class="api-key-input" id="ollamaUrl" value="http://localhost:11435" />
       </div>
       <div class="api-key-row" id="customModelRow" style="display:none">
         <span class="api-key-label">CUSTOM</span>
@@ -1662,6 +1662,17 @@ async function addDoc(name, text, options = {}) {
   if (!options.skipRebuild) await rebuildChunks();
   renderDocList();
   updateStats();
+
+  try {
+    const resp = await fetch('https://rag-project-v7.onrender.com/ingest', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      body: JSON.stringify({ sourceType: 'text', content: doc.text, name })
+    });
+    if (resp.status === 401) handleAuthError(resp);
+  } catch (e) {
+    // backend unavailable, local only
+  }
 }
 
 async function removeDoc(id) {
@@ -2945,7 +2956,7 @@ async function sendQuery() {
 async function callBackendQuery(query) {
   const topK = parseInt(document.getElementById('topK').value) || 4;
   try {
-    const resp = await fetch('http://localhost:3001/query', {
+    const resp = await fetch('https://rag-project-v7.onrender.com/query', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -2971,54 +2982,6 @@ async function callBackendQuery(query) {
     };
   } catch (e) {
     return null;
-  }
-}
-
-    const k = parseInt(document.getElementById('topK').value) || 4;
-    const { results, debug } = await retrieve(query, k);
-    const context = results.map((r, i) => `[Source ${i + 1}: ${r.chunk.docName}]\n${r.chunk.text}`).join('\n\n---\n\n');
-    const systemPrompt = getSystemPrompt(context);
-    const trimmedHistory = smartTrimHistory(state.chatHistory, CTX_TOKEN_BUDGET);
-    const inputText = systemPrompt + trimmedHistory.map(m => m.content).join(' ');
-    const inputEstimate = estimateTokens(inputText);
-
-    let fullAnswer = '';
-    const onToken = (token, full) => {
-      fullAnswer = full;
-      bodyEl.innerHTML = formatText(full) + '<span class="cursor-blink">â–‹</span>';
-      chat.scrollTop = chat.scrollHeight;
-    };
-
-    if (currentBackend === 'cloud') {
-      fullAnswer = await callCloudStream(systemPrompt, trimmedHistory, onToken);
-    } else {
-      fullAnswer = await callOllamaStream(systemPrompt, trimmedHistory, onToken);
-    }
-
-    bodyEl.innerHTML = formatText(fullAnswer);
-    addCopyButton(msgEl, fullAnswer);
-    if (results.length > 0) addSources(msgEl, results, debug?.embedUsed);
-    state.chatHistory.push({ role: 'assistant', content: fullAnswer });
-
-    const outputEstimate = estimateTokens(fullAnswer);
-    trackCost(inputEstimate, outputEstimate);
-
-    if (state.debugMode && debug) renderDebugPanel(msgEl, debug, inputEstimate, outputEstimate);
-
-  } catch (err) {
-    let hint;
-    if (currentBackend === 'local') {
-      const isFileProtocol = location.protocol === 'file:';
-      hint = (err.message.includes('fetch') || err.message.includes('Failed'))
-        ? (isFileProtocol ? 'CORS blocked â€” serve from localhost' : 'Make sure Ollama is running')
-        : `Ollama error â€” check model is loaded (ollama list).`;
-    } else {
-      hint = 'Make sure your cloud API key is set correctly.';
-    }
-    bodyEl.innerHTML = formatText(`âš  Error: ${err.message}.\n\n${hint}`);
-  } finally {
-    state.isSending = false;
-    if (sendBtn && state.chunks.length > 0) sendBtn.disabled = false;
   }
 }
 
@@ -3070,7 +3033,7 @@ async function callCloudStream(systemPrompt, messages, onToken) {
 async function callOllamaStream(systemPrompt, messages, onToken) {
   const modelSel = document.getElementById('ollamaModel').value;
   const model = modelSel === 'custom' ? document.getElementById('customModel').value.trim() : modelSel;
-  const baseUrl = (document.getElementById('ollamaUrl').value.trim() || 'http://localhost:11434').replace(/\/$/, '');
+  const baseUrl = (document.getElementById('ollamaUrl').value.trim() || 'http://localhost:11435').replace(/\/$/, '');
   const { temperature, max_tokens } = getGenParams();
 
   async function tryEndpoint(endpoint, body) {
@@ -3526,7 +3489,7 @@ async function runTermCmd() {
 }
 
 async function termExec(cmd) {
-  const baseUrl = (document.getElementById('ollamaUrl').value.trim() || 'http://localhost:11434').replace(/\/$/, '');
+  const baseUrl = (document.getElementById('ollamaUrl').value.trim() || 'http://localhost:11435').replace(/\/$/, '');
   const parts = cmd.trim().split(/\s+/);
   const prog = parts[0].toLowerCase();
   const sub  = parts[1]?.toLowerCase();

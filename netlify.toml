@@ -1,0 +1,8 @@
+[build]
+  publish = "."
+  command = "echo 'No build required'"
+
+[[redirects]]
+  from = "/*"
+  to = "/rag_project_v6_2.html"
+  status = 200

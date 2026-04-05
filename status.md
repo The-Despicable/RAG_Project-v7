@@ -3,10 +3,10 @@
 ## Current Status
 
 - Project folder: `C:\Users\yaser\Desktop\RAG_PROJECT_V7`
-- Current phase: `Phase 8.6`
-- Completed phases: `8`
-- In-progress phase level: `8.6`
-- System maturity: `production-grade RAG engine`, not yet full production product
+- Current phase: `Phase 11`
+- Completed phases: `8, 8.5, 8.6, 11`
+- In-progress phase level: `11`
+- System maturity: `production-grade RAG engine with auth and multi-user isolation`
 
 ## Phase Summary
 
@@ -20,6 +20,7 @@
 8. Baseline generation evaluation
 8.5. Embedding-based groundedness for generation eval
 8.6. Auto-calibration and versioned safety rollout
+11. Product layer — auth, multi-user document isolation, frontend integration
 
 ## What Is Implemented
 
@@ -29,16 +30,25 @@
 - Auto provider detection
 - Dynamic model discovery with fallback model handling
 - Shared resolver path for test connection and live cloud requests
+- API key input field (pre-filled with `key-user1`)
+- Auth header injection on all backend fetch calls
+- 401 auth error handling with user-facing message
+- Backend query integration: `sendQuery()` calls `POST /query` with auth, falls back to local retrieval + direct LLM if backend unavailable
+- Document ingestion now also sends to `POST /ingest` with auth headers
+- Ollama default URL corrected to `http://localhost:11435`
 
 ### Backend Core
 
 - Fastify API with:
-  - `/query`
-  - `/ingest`
-  - `/eval/run`
-  - `/eval/latest`
-  - `/eval/generation`
-  - `/eval/generation/latest`
+  - `/query` (auth required)
+  - `/ingest` (auth required)
+  - `/eval/run` (auth required)
+  - `/eval/latest` (auth required)
+  - `/eval/generation` (auth required)
+  - `/eval/generation/latest` (auth required)
+  - `/eval/calibrate` (auth required)
+  - `/health` (public)
+  - `/metrics` (public)
 - PostgreSQL schema with:
   - `documents`
   - `chunks`
@@ -47,9 +57,22 @@
   - `eval_dataset`
   - `eval_runs`
   - `generation_eval_runs`
+  - HNSW index on `chunks.embedding`
 - Worker-based ingestion pipeline
 - Backend chunking and embedding generation
 - Retrieval restricted to `documents.status = 'ready'`
+
+### Auth & Multi-User Isolation (Phase 11)
+
+- API key authentication via `RAG_API_KEYS` env var (comma-separated)
+- `Authorization: Bearer <key>` header extraction
+- Key doubles as `userId` for document ownership
+- `src/utils/auth.js` — Fastify preHandler hook
+- Ingest routes store `userId` in `documents.metadata` and `ingest_jobs.payload`
+- Query routes pass `userId` to retrieval for user-scoped filtering
+- Eval routes protected with auth
+- Retrieval service filters all DB queries by `documents.metadata->>'userId' = $userId`
+- `/health` and `/metrics` remain public
 
 ### Retrieval
 
@@ -60,6 +83,7 @@
 - MMR reranking
 - Deterministic retrieval mode
 - Hybrid retrieval mode
+- User-scoped retrieval (Phase 11)
 
 ### Generation
 
@@ -69,6 +93,7 @@
 - No-context fallback:
   - `Not found in provided documents.`
 - Provider/model resolution on backend
+- Frontend calls backend `/query` with auth, falls back to direct Ollama/cloud
 
 ### Evaluation
 
@@ -93,7 +118,7 @@
 
 ## Key Findings
 
-- The system is roughly `75% to 85%` toward a full production-ready product.
+- The system is roughly `85% to 90%` toward a full production-ready product.
 - The RAG engine itself is strong and complete enough for interview/demo use.
 - Remaining work is mostly hardening and product infrastructure, not core AI architecture.
 - Retrieval and generation evaluation must stay separate to preserve signal quality.
@@ -102,6 +127,7 @@
 - Retrieval should only expose fully indexed documents:
   - `documents.status = 'ready'`
 - Browser-direct provider access is useful for demos, but backend-controlled model calls are more stable for real usage.
+- Frontend does not call backend for retrieval — it does local BM25/TF-IDF/embedding retrieval. Backend `/query` is called for RAG with generation.
 
 ## Major Changes Logged
 
@@ -110,6 +136,7 @@
 - Created backend project under `backend/`
 - Moved all project assets into `C:\Users\yaser\Desktop\RAG_PROJECT_V7`
 - Added worker entrypoint and backend modules for retrieval, ingest, generation, and eval
+- Initialized git repo with `.gitignore` for `node_modules/` and `.env`
 
 ### Backend Changes
 
@@ -121,12 +148,23 @@
 - Added semantic groundedness using stored chunk embeddings plus answer embedding
 - Added calibration loader, threshold fitting, confidence weight fitting, and config evaluation
 - Added versioned safety config with debug visibility for active thresholds and weights
+- **Phase 11**: Added `src/utils/auth.js` API key authentication middleware
+- **Phase 11**: Added `userId` to ingest jobs and document metadata
+- **Phase 11**: Added `userId` filtering to all retrieval queries
+- **Phase 11**: Added auth preHandler to ingest, query, and eval routes
+- **Phase 11**: Added `RAG_API_KEYS` to `.env` and `.env.example`
+- **Phase 11**: HNSW index defined in `schema.sql`
 
 ### Frontend Changes
 
 - Upgraded static provider UI into adaptive provider flow
 - Added auto-detection and dynamic model selection behavior
 - Added provider fallback handling and status display
+- Added API key input field with `getAuthHeaders()` and `handleAuthError()` helpers
+- Wired `sendQuery()` to call backend `/query` with auth, with local fallback
+- Wired `addDoc()` to also POST to backend `/ingest` with auth
+- Fixed Ollama default URL from `11434` to `11435`
+- Fixed orphaned code block that broke JavaScript syntax
 
 ## Current Risks / Remaining Gaps
 
@@ -134,10 +172,6 @@
   - retry logic
   - timeout handling
   - stronger crash recovery
-- Multi-user isolation is not implemented:
-  - auth
-  - document ownership
-  - per-user filtering
 - Performance hardening is not complete:
   - ANN index tuning
   - caching
@@ -170,6 +204,13 @@
   - `SAFETY_CONFIG_V1`
   - `SAFETY_CONFIG_V2`
   - `ACTIVE_CONFIG = SAFETY_CONFIG_V1`
+- **Phase 11**: Full auth + multi-user document isolation implemented
+- **Phase 11**: Frontend auth integration with API key input and error handling
+- **Phase 11**: Backend query endpoint wired to frontend with auth headers
+- **Phase 11**: Document ingestion now sends to backend with auth
+- **Phase 11**: Ollama URL fixed to port 11435
+- **Phase 11**: Git repo initialized, `.gitignore` files created
+- **Phase 11**: Orphaned JavaScript code block fixed
 
 ### Current Rollout State
 
@@ -193,6 +234,7 @@ From `C:\Users\yaser\Desktop\RAG_PROJECT_V7\backend`:
 3. set env vars:
    - `DATABASE_URL`
    - `LLM_API_KEY` or `OPENROUTER_API_KEY`
+   - `RAG_API_KEYS=key-user1,key-user2`
    - optional `LLM_PROVIDER`, `LLM_MODEL`, `LLM_BASE_URL`
 4. run API:
    - `node src/server.js`
@@ -221,16 +263,10 @@ From `C:\Users\yaser\Desktop\RAG_PROJECT_V7\backend`:
 - request metrics
 - structured logs
 
-### Phase 11
-
-- Product layer
-- auth
-- multi-user document isolation
-- deployment polish
-
 ## Important Paths
 
 - Frontend: `C:\Users\yaser\Desktop\RAG_PROJECT_V7\rag_project_v6_2.html`
 - Backend root: `C:\Users\yaser\Desktop\RAG_PROJECT_V7\backend`
 - Schema: `C:\Users\yaser\Desktop\RAG_PROJECT_V7\backend\schema.sql`
 - Worker: `C:\Users\yaser\Desktop\RAG_PROJECT_V7\backend\worker.js`
+- Auth middleware: `C:\Users\yaser\Desktop\RAG_PROJECT_V7\backend\src\utils\auth.js`

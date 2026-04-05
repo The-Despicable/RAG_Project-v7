@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: rag-v7-backend
+    env: node
+    region: oregon
+    plan: starter
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3001
+      - key: DATABASE_URL
+        sync: false
+      - key: LLM_PROVIDER
+        value: ollama
+      - key: OLLAMA_BASE_URL
+        value: https://api.ollama.com
+      - key: OLLAMA_API_KEY
+        sync: false
+      - key: OLLAMA_MODEL
+        value: minimax-m2.7:cloud
+      - key: OPENROUTER_EMBEDDING_DIMENSIONS
+        value: 384
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: RAG_API_KEYS
+        sync: false

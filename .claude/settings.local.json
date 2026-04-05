@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git push:*)",
+      "Bash(git remote:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git config:*)",
+      "Bash(npm install:*)",
+      "Bash(netlify login:*)",
+      "Bash(netlify deploy:*)"
+    ]
+  }
+}

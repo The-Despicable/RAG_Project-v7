@@ -55,7 +55,8 @@ async function callOllama({ prompt, baseUrl, model }) {
   const response = await fetch(`${baseUrl}/api/chat`, {
     method: "POST",
     headers: {
-      "Content-Type": "application/json"
+      "Content-Type": "application/json",
+      ...(process.env.OLLAMA_API_KEY ? { 'Authorization': `Bearer ${process.env.OLLAMA_API_KEY}` } : {})
     },
     body: JSON.stringify({
       model,

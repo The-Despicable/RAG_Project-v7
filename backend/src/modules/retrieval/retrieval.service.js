@@ -1,4 +1,4 @@
-import { pool } from "../../db/client.js";
+﻿import { pool } from "../../db/client.js";
 import { embed, formatVectorLiteral } from "../../utils/embed.js";
 import { tokenize } from "../../utils/tokenizer.js";
 import { bm25Score, buildTF, buildTFRaw, computeIDF } from "./bm25.js";

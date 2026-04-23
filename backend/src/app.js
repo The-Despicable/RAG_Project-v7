@@ -1,4 +1,15 @@
+﻿function sanitizeInput(str) {
+  return typeof str === "string" ? str.replace(/[\x00]/g, "") : str;
+}
+
+function stripNullBytes(obj) {
+  if (typeof obj !== "object" || obj === null) return obj;
+  if (Array.isArray(obj)) return obj.map(stripNullBytes);
+  return Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, typeof v === "string" ? sanitizeInput(v) : stripNullBytes(v)]));
+}
+
 import Fastify from "fastify";
+import cors from "@fastify/cors";
 import evalRoute from "./routes/eval.route.js";
 import queryRoute from "./routes/query.route.js";
 import ingestRoute from "./routes/ingest.route.js";
@@ -10,7 +21,16 @@ const app = Fastify({
   connectionTimeout: 30000
 });
 
+// Register CORS plugin for cross-origin requests
+app.register(cors, {
+  origin: ["https://rag-v7.netlify.app", "http://localhost:3000", "http://localhost:5173", "http://localhost:3001"],
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "x-api-key", "x-base-url", "x-model", "x-provider"],
+  credentials: true
+});
+
 app.addHook("onRequest", async (request) => {
+  request.body = stripNullBytes(request.body || {});
   request.requestStartTime = process.hrtime.bigint();
 });
 

@@ -10,62 +10,42 @@ function embeddingDimensions() {
   return Number(raw);
 }
 
+function validateApiKey() {
+  if (!process.env.OPENROUTER_API_KEY || process.env.OPENROUTER_API_KEY.trim() === "") {
+    console.error("FATAL: OPENROUTER_API_KEY not set. Embeddings cannot be generated.");
+    throw new Error("OPENROUTER_API_KEY is not configured.");
+  }
+}
+
 export function formatVectorLiteral(vector) {
   if (!Array.isArray(vector) || vector.length === 0) {
     throw new Error("Embedding vector is empty or invalid.");
   }
-
-  return `[${vector.map((value) => Number(value)).join(",")}]`;
+  return `[${vector.map((v)=>Number(v)).join(",")}]`;
 }
 
 export async function embed(text) {
-  const apiKey = process.env.OPENROUTER_API_KEY;
+  validateApiKey();
+  const apiKey = process.env.OPENROUTER_API_KEY.trim();
   const model = process.env.OPENROUTER_EMBEDDING_MODEL || "text-embedding-3-small";
   const dimensions = embeddingDimensions();
-
-  if (!apiKey) {
-    throw new Error("OPENROUTER_API_KEY is not configured.");
-  }
-
+  if (!apiKey) throw new Error("OPENROUTER_API_KEY is not configured.");
   const start = process.hrtime.bigint();
   try {
     const result = await withRetry(async () => {
       const response = await fetch(formatEmbeddingEndpoint(), {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          model,
-          input: text,
-          dimensions
-        })
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({ model, input: text, dimensions })
       });
-
-      if (!response.ok) {
-        const body = await response.text();
-        throw new Error(`Embedding request failed with HTTP ${response.status}: ${body}`);
+      if (!response.ok) { const b = await response.text(); throw new Error(`Embedding failed: HTTP ${response.status}: ${b}`); }
+      const data = await response.json(); const vector = data?.data?.[0]?.embedding;
+      if (!Array.isArray(vector) || vector.length === 0 || vector.length !== dimensions) {
+        throw new Error("Invalid embedding response");
       }
-
-      const data = await response.json();
-      const vector = data?.data?.[0]?.embedding;
-
-      if (!Array.isArray(vector) || vector.length === 0) {
-        throw new Error("Embedding response did not include a usable vector.");
-      }
-
-      if (vector.length !== dimensions) {
-        throw new Error(`Embedding response dimension mismatch. Expected ${dimensions}, got ${vector.length}.`);
-      }
-
       return vector;
     }, { maxAttempts: 3, baseDelayMs: 1000 });
-    const elapsed = Number(process.hrtime.bigint() - start) / 1e6;
-    recordLatency("embedding", elapsed);
+    recordLatency("embedding", Number(process.hrtime.bigint() - start) / 1e6);
     return result;
-  } catch (error) {
-    recordError("embedding");
-    throw error;
-  }
+  } catch (error) { recordError("embedding"); throw error; }
 }

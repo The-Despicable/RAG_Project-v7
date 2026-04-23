@@ -1,4 +1,4 @@
-import { detectProvider } from "../../utils/provider.js";
+﻿import { detectProvider } from "../../utils/provider.js";
 import { getDefaultModel } from "../../utils/modelResolver.js";
 import { withRetry } from "../../utils/retry.js";
 import { recordLatency, recordError } from "../../utils/metrics.js";
@@ -124,3 +124,7 @@ export async function generate({ prompt, apiKey, baseUrl, model, provider }) {
     throw error;
   }
 }
+
+
+
+

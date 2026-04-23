@@ -1,0 +1,4206 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>RAG OS — Hybrid Retrieval Engine</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+<script type="module">
+  import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/dist/transformers.min.js';
+  env.allowLocalModels = false;
+  window._transformersPipeline = pipeline;
+</script>
+<style>
+  :root {
+    --bg: #0f0f0f;
+    --surface: #171717;
+    --surface-2: #1e1e1e;
+    --surface-3: #252525;
+    --border: #2a2a2a;
+    --border-hi: #3a3a3a;
+    --amber: #ffb786;
+    --amber-2: #f57c00;
+    --amber-dim: rgba(255,183,134,0.12);
+    --amber-glow: rgba(255,183,134,0.06);
+    --blue: #98cbff;
+    --blue-dim: rgba(152,203,255,0.1);
+    --green: #4ade80;
+    --green-dim: rgba(74,222,128,0.1);
+    --red: #f87171;
+    --text: #e8e6e3;
+    --text-2: #a09d99;
+    --text-3: #5a5755;
+    --mono: 'DM Mono', monospace;
+    --sans: 'Syne', sans-serif;
+    --radius: 6px;
+    --radius-lg: 10px;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.6;
+    height: 100vh;
+    overflow: hidden;
+    position: relative;
+  }
+
+  body::before {
+    content: '';
+    position: fixed;
+    width: 600px; height: 600px;
+    background: radial-gradient(circle, rgba(255,183,134,0.04) 0%, transparent 70%);
+    top: -200px; right: -100px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  body::after {
+    content: '';
+    position: fixed;
+    width: 400px; height: 400px;
+    background: radial-gradient(circle, rgba(152,203,255,0.03) 0%, transparent 70%);
+    bottom: -100px; left: 200px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .noise {
+    position: fixed; inset: 0;
+    background-image:
+      linear-gradient(rgba(255,183,134,0.015) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,183,134,0.015) 1px, transparent 1px);
+    background-size: 48px 48px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .layout {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    grid-template-columns: 240px 1fr;
+    grid-template-rows: 52px 1fr;
+    height: 100vh;
+  }
+
+  /* ── TOPBAR ── */
+  .topbar {
+    grid-column: 1 / -1;
+    background: rgba(23,23,23,0.9);
+    backdrop-filter: blur(20px);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 20px;
+    gap: 0;
+  }
+
+  .brand {
+    font-family: var(--sans);
+    font-size: 15px;
+    font-weight: 800;
+    color: var(--amber);
+    letter-spacing: -0.5px;
+    margin-right: 32px;
+  }
+
+  .brand sub {
+    font-size: 9px;
+    font-weight: 400;
+    color: var(--text-3);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    vertical-align: super;
+    margin-left: 6px;
+    font-family: var(--mono);
+  }
+
+  .topbar-meta {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .chip {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 100px;
+    font-size: 10px;
+    color: var(--text-2);
+    letter-spacing: 0.5px;
+  }
+
+  .chip .dot {
+    width: 5px; height: 5px;
+    border-radius: 50%;
+  }
+
+  .chip .dot.green { background: var(--green); box-shadow: 0 0 6px var(--green); animation: breathe 2s ease-in-out infinite; }
+  .chip .dot.amber { background: var(--amber); }
+  .chip .dot.blue { background: var(--blue); }
+  .chip .dot.dim { background: var(--text-3); }
+
+  @keyframes breathe {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  .embed-chip {
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .embed-chip:hover { border-color: var(--amber); }
+
+  .debug-chip {
+    cursor: pointer;
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    padding: 4px 10px;
+    border-radius: 100px;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text-3);
+    transition: all 0.15s;
+  }
+  .debug-chip.active { border-color: rgba(167,139,250,0.4); color: rgba(167,139,250,0.9); background: rgba(167,139,250,0.06); }
+
+  /* ── SIDEBAR ── */
+  .sidebar {
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+
+  .sidebar::-webkit-scrollbar { width: 4px; }
+  .sidebar::-webkit-scrollbar-thumb { background: var(--border-hi); border-radius: 2px; }
+
+  .sidebar-section {
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .section-label {
+    font-size: 9px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--text-3);
+    padding: 0 16px 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .section-label::before {
+    content: '';
+    width: 3px; height: 3px;
+    background: var(--amber);
+    border-radius: 50%;
+  }
+
+  /* Drop zone */
+  .drop-zone {
+    margin: 0 12px 8px;
+    border: 1px dashed var(--border-hi);
+    border-radius: var(--radius);
+    padding: 16px 12px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .drop-zone:hover, .drop-zone.dragover {
+    border-color: var(--amber);
+    background: var(--amber-glow);
+  }
+
+  .drop-zone input[type="file"] {
+    position: absolute; inset: 0; opacity: 0; cursor: pointer;
+  }
+
+  .drop-zone .dz-icon { font-size: 20px; margin-bottom: 6px; display: block; }
+  .drop-zone p { color: var(--text-3); font-size: 10px; line-height: 1.8; }
+  .drop-zone strong { color: var(--amber); }
+
+  /* Paste area */
+  .paste-wrap { padding: 0 12px 8px; }
+
+  .paste-label {
+    font-size: 9px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--text-3);
+    display: block;
+    margin-bottom: 6px;
+  }
+
+  .paste-ta {
+    width: 100%;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.6;
+    padding: 8px 10px;
+    resize: none;
+    height: 72px;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  .paste-ta:focus { border-color: rgba(255,183,134,0.4); }
+  .paste-ta::placeholder { color: var(--text-3); }
+
+  /* Buttons */
+  .obs-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 7px 12px;
+    border: 1px solid var(--border-hi);
+    background: transparent;
+    color: var(--text-2);
+    font-family: var(--mono);
+    font-size: 11px;
+    cursor: pointer;
+    border-radius: var(--radius);
+    transition: all 0.15s;
+    letter-spacing: 0.5px;
+  }
+  .obs-btn:hover { border-color: var(--amber); color: var(--amber); }
+  .obs-btn.primary { background: var(--amber); border-color: var(--amber); color: #1a0a00; font-weight: 700; font-family: var(--sans); }
+  .obs-btn.primary:hover { background: #ffcba4; }
+  .obs-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+  .obs-btn.sm { padding: 5px 10px; font-size: 10px; }
+  .obs-btn.danger:hover { border-color: var(--red); color: var(--red); }
+
+  .btn-row {
+    display: flex;
+    gap: 6px;
+    padding: 0 12px 4px;
+  }
+
+  /* Ingest tabs */
+  .ingest-section {
+    margin: 0 12px 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+
+  .ingest-tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .itab {
+    flex: 1;
+    padding: 6px 0;
+    font-size: 10px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    background: transparent;
+    border: none;
+    color: var(--text-3);
+    cursor: pointer;
+    font-family: var(--mono);
+    transition: all 0.15s;
+  }
+  .itab.active { color: var(--amber); background: var(--amber-glow); }
+  .itab:hover:not(.active) { color: var(--text-2); }
+
+  .ingest-panel { display: none; padding: 10px; gap: 6px; flex-direction: column; }
+  .ingest-panel.active { display: flex; }
+
+  .obs-input {
+    width: 100%;
+    background: var(--surface-3);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 6px 10px;
+    border-radius: var(--radius);
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  .obs-input:focus { border-color: rgba(255,183,134,0.4); }
+  .obs-input::placeholder { color: var(--text-3); }
+
+  .ingest-hint { font-size: 10px; color: var(--text-3); line-height: 1.5; }
+
+  /* Progress bar */
+  .progress-bar {
+    height: 2px;
+    background: var(--border);
+    overflow: hidden;
+    display: none;
+    margin: 0 12px 8px;
+    border-radius: 1px;
+  }
+  .progress-bar.visible { display: block; }
+  .progress-fill { height: 100%; background: var(--amber); width: 0%; transition: width 0.3s; }
+
+  /* Alert */
+  .alert {
+    margin: 0 12px 8px;
+    padding: 7px 10px;
+    border-radius: var(--radius);
+    font-size: 11px;
+    border-left: 2px solid;
+    display: none;
+  }
+  .alert.error { background: rgba(248,113,113,0.08); border-color: var(--red); color: #fca5a5; display: block; }
+  .alert.warn { background: var(--amber-glow); border-color: rgba(255,183,134,0.4); color: var(--amber); display: block; }
+
+  /* Doc list */
+  .doc-list {
+    max-height: 220px;
+    overflow-y: auto;
+  }
+
+  .doc-list::-webkit-scrollbar { width: 4px; }
+  .doc-list::-webkit-scrollbar-thumb { background: var(--border-hi); border-radius: 2px; }
+
+  .doc-item {
+    padding: 9px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    cursor: pointer;
+    transition: background 0.15s;
+    position: relative;
+  }
+  .doc-item:hover { background: var(--amber-glow); }
+
+  .doc-icon { color: var(--amber); font-size: 14px; margin-top: 1px; flex-shrink: 0; }
+  .doc-info { flex: 1; min-width: 0; }
+  .doc-name { font-family: var(--sans); font-size: 11px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+  .doc-meta { font-size: 10px; color: var(--text-3); margin-top: 2px; }
+  .doc-preview { font-size: 10px; color: var(--text-3); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .doc-del {
+    background: none; border: none; color: var(--text-3); cursor: pointer;
+    font-size: 12px; padding: 2px 4px; line-height: 1; transition: color 0.15s; flex-shrink: 0;
+  }
+  .doc-del:hover { color: var(--red); }
+
+  .empty-docs {
+    padding: 20px 16px;
+    text-align: center;
+    color: var(--text-3);
+    font-size: 11px;
+    line-height: 2;
+  }
+
+  /* Config rows */
+  .config-row {
+    padding: 10px 12px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .config-label {
+    font-size: 9px;
+    color: var(--text-3);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+  .config-input {
+    background: var(--surface-3);
+    border: 1px solid var(--border);
+    color: var(--text-2);
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 3px 7px;
+    border-radius: var(--radius);
+    width: 60px;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  .config-input:focus { border-color: rgba(255,183,134,0.4); }
+
+  /* Backend tabs */
+  .backend-tabs { display: flex; gap: 4px; padding: 10px 12px 6px; }
+
+  .btab {
+    flex: 1;
+    padding: 6px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--text-3);
+    font-family: var(--mono);
+    font-size: 10px;
+    cursor: pointer;
+    border-radius: var(--radius);
+    transition: all 0.15s;
+    letter-spacing: 0.5px;
+  }
+  .btab.active { border-color: rgba(255,183,134,0.3); color: var(--amber); background: var(--amber-dim); }
+  .btab:hover:not(.active) { border-color: var(--border-hi); color: var(--text-2); }
+
+  /* API key row */
+  .api-key-row {
+    padding: 6px 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .api-key-label { font-size: 9px; color: var(--text-3); letter-spacing: 1px; white-space: nowrap; text-transform: uppercase; }
+
+  .api-key-input {
+    flex: 1;
+    background: var(--surface-3);
+    border: 1px solid var(--border);
+    color: var(--text-2);
+    font-family: var(--mono);
+    font-size: 10px;
+    padding: 4px 8px;
+    border-radius: var(--radius);
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  .api-key-input:focus { border-color: rgba(255,183,134,0.4); }
+
+  /* Terminal */
+  .terminal-wrap {
+    margin: 4px 12px 8px;
+    border: 1px solid var(--border-hi);
+    border-radius: var(--radius);
+    overflow: hidden;
+    background: #080808;
+  }
+  .terminal-titlebar {
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--border);
+    padding: 5px 12px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 10px;
+    color: var(--text-3);
+    letter-spacing: 0.5px;
+  }
+  .terminal-titlebar .dot-r { background:#ef4444; }
+  .terminal-titlebar .dot-y { background:#f59e0b; }
+  .terminal-titlebar .dot-g { background:#22c55e; }
+  .term-dot { width:8px;height:8px;border-radius:50%; }
+  .term-title { margin-left:4px; color: var(--text-3); }
+  .terminal-output {
+    height: 160px;
+    overflow-y: auto;
+    padding: 10px 12px;
+    font-size: 11px;
+    line-height: 1.7;
+    font-family: var(--mono);
+    color: #b0b0b0;
+  }
+  .terminal-output::-webkit-scrollbar { width: 3px; }
+  .terminal-output::-webkit-scrollbar-thumb { background: var(--border-hi); }
+  .term-line { display: flex; gap: 0; flex-wrap: wrap; }
+  .term-prompt { color: var(--amber); user-select: none; margin-right: 6px; flex-shrink:0; }
+  .term-cmd { color: #e8e8e8; }
+  .term-out { color: #888; width: 100%; padding-left: 0; white-space: pre-wrap; }
+  .term-out.success { color: var(--green); }
+  .term-out.error { color: var(--red); }
+  .term-out.info { color: var(--amber); }
+  .term-out.model-item { color: #b0b0b0; }
+  .terminal-input-row {
+    display: flex;
+    align-items: center;
+    border-top: 1px solid var(--border);
+    padding: 6px 12px;
+    gap: 6px;
+    background: #080808;
+  }
+  .term-input-prompt { color: var(--amber); font-size: 11px; flex-shrink:0; user-select:none; }
+  .term-input {
+    flex: 1; background: transparent; border: none; outline: none; color: #e8e8e8;
+    font-family: var(--mono); font-size: 11px; caret-color: var(--amber);
+  }
+  .term-input::placeholder { color: var(--text-3); }
+  .term-run-btn {
+    background: none; border: 1px solid var(--border); color: var(--text-3);
+    font-family: var(--mono); font-size: 10px; padding: 2px 8px; border-radius: 3px;
+    cursor: pointer; transition: all 0.15s; flex-shrink: 0;
+  }
+  .term-run-btn:hover { border-color: var(--amber); color: var(--amber); }
+  .term-help { padding: 4px 12px 8px; display: flex; flex-wrap: wrap; gap: 4px; }
+  .term-chip {
+    font-size: 9px; padding: 2px 8px; background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: 100px; color: var(--text-3); cursor: pointer; transition: all 0.15s; font-family: var(--mono);
+  }
+  .term-chip:hover { border-color: rgba(255,183,134,0.3); color: var(--text-2); }
+
+  /* Sidebar footer */
+  .sidebar-footer {
+    margin-top: auto;
+    padding: 12px;
+    border-top: 1px solid var(--border);
+  }
+
+  /* ── MAIN ── */
+  .main {
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Doc panel (top bar above chat) */
+  .doc-panel {
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    flex-shrink: 0;
+  }
+
+  .doc-panel-header {
+    padding: 10px 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    font-size: 10px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--text-3);
+    user-select: none;
+    transition: background 0.15s;
+    font-family: var(--sans);
+    font-weight: 600;
+  }
+  .doc-panel-header:hover { background: var(--amber-glow); }
+
+  .doc-panel-count {
+    background: var(--amber-dim);
+    border: 1px solid rgba(255,183,134,0.2);
+    color: var(--amber);
+    font-size: 10px;
+    padding: 1px 8px;
+    border-radius: 100px;
+  }
+
+  .doc-panel-toggle { margin-left: auto; color: var(--text-3); font-size: 10px; transition: transform 0.2s; }
+  .doc-panel-header.open .doc-panel-toggle { transform: rotate(180deg); }
+
+  .doc-panel-grid {
+    display: none;
+    padding: 12px 16px;
+    gap: 10px;
+    flex-wrap: wrap;
+    max-height: 220px;
+    overflow-y: auto;
+  }
+  .doc-panel-grid.open { display: flex; }
+
+  .doc-card {
+    background: var(--surface-2);
+    border: 1px solid var(--border-hi);
+    border-radius: var(--radius-lg);
+    padding: 12px 14px;
+    min-width: 200px;
+    max-width: 260px;
+    flex: 1;
+    position: relative;
+    transition: border-color 0.15s;
+  }
+  .doc-card:hover { border-color: rgba(255,183,134,0.3); }
+  .doc-card-icon { font-size: 20px; display: block; margin-bottom: 6px; }
+  .doc-card-name { font-family: var(--sans); font-size: 12px; font-weight: 700; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 4px; padding-right: 18px; }
+  .doc-card-meta { font-size: 10px; color: var(--amber); font-weight: 500; }
+  .doc-card-preview { font-size: 10px; color: var(--text-3); margin-top: 5px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.6; }
+  .doc-card-del { position: absolute; top: 6px; right: 8px; background: none; border: none; color: var(--text-3); cursor: pointer; font-size: 11px; line-height: 1; transition: color 0.15s; }
+  .doc-card-del:hover { color: var(--red); }
+
+  /* Chat messages */
+  .chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 28px;
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+  }
+  .chat-messages::-webkit-scrollbar { width: 4px; }
+  .chat-messages::-webkit-scrollbar-thumb { background: var(--border-hi); border-radius: 2px; }
+
+  /* Welcome */
+  .welcome {
+    text-align: center;
+    padding: 60px 40px;
+    max-width: 480px;
+    margin: auto;
+  }
+
+  .welcome h2 {
+    font-family: var(--sans);
+    font-size: 32px;
+    font-weight: 800;
+    color: var(--amber);
+    margin-bottom: 12px;
+    line-height: 1.2;
+    letter-spacing: -1px;
+  }
+
+  .welcome h2 em { font-style: italic; font-weight: 400; }
+  .welcome p { color: var(--text-3); font-size: 12px; line-height: 1.9; }
+
+  .welcome .steps {
+    margin-top: 24px;
+    text-align: left;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .step {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    font-size: 11px;
+    color: var(--text-3);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 10px 12px;
+  }
+
+  .step-n {
+    color: var(--amber);
+    font-family: var(--sans);
+    font-weight: 700;
+    flex-shrink: 0;
+    font-size: 12px;
+  }
+
+  /* Messages */
+  .message {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    animation: fadeUp 0.3s ease;
+  }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .message-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 9px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--text-3);
+  }
+
+  .message-header .tag {
+    padding: 2px 8px;
+    border-radius: 100px;
+    font-weight: 600;
+    font-family: var(--sans);
+    font-size: 9px;
+  }
+
+  .user-tag { background: var(--surface-3); color: var(--text-2); border: 1px solid var(--border-hi); }
+  .ai-tag { background: var(--amber-dim); color: var(--amber); border: 1px solid rgba(255,183,134,0.2); }
+
+  .msg-actions { margin-left: auto; display: flex; gap: 6px; }
+
+  .copy-btn {
+    background: none; border: 1px solid var(--border); color: var(--text-3);
+    font-family: var(--mono); font-size: 9px; padding: 2px 8px; border-radius: 4px;
+    cursor: pointer; transition: all 0.15s; letter-spacing: 0.3px;
+  }
+  .copy-btn:hover { border-color: var(--amber); color: var(--amber); }
+
+  .message-body {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 16px 20px;
+    font-size: 13px;
+    line-height: 1.8;
+    color: var(--text);
+  }
+
+  .message.user .message-body {
+    background: var(--surface-3);
+    border-color: var(--border-hi);
+    color: var(--text-2);
+  }
+
+  .cursor-blink { animation: cursorPulse 1s infinite; }
+  @keyframes cursorPulse { 0%,100%{ opacity:1} 50%{opacity:0} }
+
+  /* Sources */
+  .sources { margin-top: 12px; }
+  .sources-title {
+    font-size: 9px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--text-3);
+    margin-bottom: 8px;
+    font-family: var(--sans);
+    font-weight: 600;
+  }
+  .source-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+
+  .source-chip {
+    font-size: 10px;
+    padding: 4px 10px;
+    background: var(--surface-2);
+    border: 1px solid var(--border-hi);
+    border-radius: var(--radius);
+    color: var(--text-2);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .source-chip:hover { border-color: rgba(255,183,134,0.4); color: var(--text); }
+  .source-chip .score { color: var(--amber); font-weight: 600; margin-left: 4px; }
+
+  .context-peek {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 10px 14px;
+    margin-top: 6px;
+    font-size: 11px;
+    color: var(--text-3);
+    line-height: 1.7;
+    max-height: 120px;
+    overflow-y: auto;
+    display: none;
+  }
+  .context-peek.visible { display: block; }
+  .context-peek mark { background: rgba(255,183,134,0.15); color: var(--amber); border-radius: 2px; }
+
+  /* Typing indicator */
+  .typing-indicator {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+    padding: 4px 0;
+  }
+  .typing-indicator span {
+    width: 5px; height: 5px;
+    background: var(--amber);
+    border-radius: 50%;
+    animation: blink 1.2s infinite;
+  }
+  .typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
+  .typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes blink {
+    0%, 80%, 100% { opacity: 0.2; transform: scale(0.8); }
+    40% { opacity: 1; transform: scale(1); }
+  }
+
+  /* Input area */
+  .input-area {
+    border-top: 1px solid var(--border);
+    padding: 16px 24px;
+    background: var(--surface);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    flex-shrink: 0;
+  }
+
+  .input-row { display: flex; gap: 10px; align-items: flex-end; }
+
+  .input-wrapper {
+    flex: 1;
+    background: var(--surface-2);
+    border: 1px solid var(--border-hi);
+    border-radius: var(--radius-lg);
+    transition: border-color 0.2s;
+    overflow: hidden;
+  }
+  .input-wrapper:focus-within {
+    border-color: rgba(255,183,134,0.4);
+    box-shadow: 0 0 0 3px rgba(255,183,134,0.05);
+  }
+
+  .query-input {
+    display: block;
+    width: 100%;
+    background: transparent;
+    border: none;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.6;
+    padding: 10px 16px;
+    resize: none;
+    height: 44px;
+    min-height: 44px;
+    max-height: 140px;
+    outline: none;
+    overflow-y: hidden;
+  }
+  .query-input::placeholder { color: var(--text-3); }
+
+  .input-meta {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 10px;
+    color: var(--text-3);
+  }
+
+  .top-k-row { display: flex; align-items: center; gap: 6px; }
+
+  .gen-select {
+    background: var(--surface-3); border: 1px solid var(--border); color: var(--text-2);
+    font-family: var(--mono); font-size: 10px; padding: 3px 6px; border-radius: var(--radius);
+    outline: none; cursor: pointer;
+  }
+  .gen-select:focus { border-color: rgba(255,183,134,0.4); }
+
+  .temp-slider {
+    -webkit-appearance: none; width: 60px; height: 3px;
+    background: var(--border-hi); border-radius: 2px; outline: none; cursor: pointer;
+  }
+  .temp-slider::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 11px; height: 11px;
+    border-radius: 50%; background: var(--amber); cursor: pointer;
+  }
+  .temp-val { color: var(--amber); font-size: 11px; min-width: 22px; }
+
+  /* Debug panel */
+  .debug-toggle {
+    display: flex; align-items: center; gap: 6px; padding: 4px 10px;
+    background: var(--surface-2); border: 1px solid var(--border); color: var(--text-3);
+    border-radius: 100px; font-family: var(--mono); font-size: 9px; cursor: pointer;
+    letter-spacing: 1px; transition: all 0.15s; text-transform: uppercase;
+  }
+  .debug-toggle .d-dot { width: 5px; height: 5px; border-radius: 50%; background: rgba(167,139,250,0.5); }
+  .debug-toggle.active { border-color: rgba(167,139,250,0.4); color: rgba(167,139,250,0.9); background: rgba(167,139,250,0.06); }
+
+  /* Debug panels */
+  .debug-panel {
+    margin-top: 12px;
+    background: rgba(10,10,10,0.9);
+    border: 1px solid rgba(167,139,250,0.15);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    font-size: 11px;
+  }
+  .debug-panel-header {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 14px; background: rgba(167,139,250,0.05);
+    border-bottom: 1px solid rgba(167,139,250,0.1); cursor: pointer;
+    font-size: 10px; color: rgba(167,139,250,0.7); letter-spacing: 0.5px;
+  }
+  .debug-panel-body { display: flex; flex-direction: column; gap: 14px; padding: 14px; }
+  .debug-section-title { font-size: 9px; letter-spacing: 1.5px; text-transform: uppercase; color: rgba(167,139,250,0.6); margin-bottom: 8px; }
+  .debug-query-tokens { display: flex; flex-wrap: wrap; gap: 4px; }
+  .debug-token-chip { font-size: 10px; padding: 2px 8px; background: rgba(167,139,250,0.08); border: 1px solid rgba(167,139,250,0.2); border-radius: 100px; color: rgba(167,139,250,0.8); }
+  .debug-stat-row { display: flex; gap: 14px; flex-wrap: wrap; }
+  .debug-stat { display: flex; flex-direction: column; gap: 2px; }
+  .debug-stat-label { font-size: 9px; color: var(--text-3); letter-spacing: 0.5px; }
+  .debug-stat-val { font-size: 13px; color: var(--text-2); font-family: var(--mono); }
+  .debug-stat-val.highlight { color: rgba(167,139,250,0.9); }
+  .dbg-badge { font-size: 8px; padding: 1px 6px; background: rgba(167,139,250,0.1); border: 1px solid rgba(167,139,250,0.2); border-radius: 100px; color: rgba(167,139,250,0.8); }
+  .debug-score-table { width: 100%; border-collapse: collapse; font-size: 10px; }
+  .debug-score-table th { text-align: left; color: var(--text-3); font-size: 9px; letter-spacing: 0.5px; padding: 3px 6px; border-bottom: 1px solid var(--border); }
+  .debug-score-table td { padding: 3px 6px; border-bottom: 1px solid var(--border); }
+  .td-name { max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .td-score { color: rgba(167,139,250,0.9); }
+  .td-bar { width: 60px; }
+  .score-bar-outer { background: var(--border); height: 4px; border-radius: 2px; }
+  .score-bar-inner { height: 4px; background: rgba(167,139,250,0.6); border-radius: 2px; }
+  .debug-filter-bar { height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; flex: 1; }
+  .debug-filter-fill { height: 100%; background: #a78bfa; border-radius: 2px; transition: width 0.4s; }
+
+  /* Cost tracker */
+  #costTracker {
+    position: fixed; bottom: 20px; left: 20px;
+    background: var(--surface); border: 1px solid var(--border-hi); border-radius: var(--radius-lg);
+    z-index: 999; font-family: var(--mono); font-size: 11px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5); min-width: 220px; overflow: hidden; transition: all 0.2s;
+  }
+  #costTracker.collapsed #costBody { display: none; }
+  .cost-titlebar {
+    display: flex; align-items: center; gap: 8px; padding: 8px 12px; cursor: pointer;
+    user-select: none; background: var(--surface-2); border-bottom: 1px solid var(--border);
+    transition: background 0.15s;
+  }
+  .cost-titlebar:hover { background: var(--amber-glow); }
+  .cost-titlebar-label { font-size: 9px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--text-3); font-family: var(--sans); font-weight: 600; }
+  .cost-titlebar .cost-total { margin-left: auto; color: var(--amber); font-weight: 600; font-size: 12px; }
+  .cost-titlebar .cost-chevron { color: var(--text-3); font-size: 9px; transition: transform 0.2s; }
+  #costTracker.collapsed .cost-chevron { transform: rotate(180deg); }
+  #costBody { padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+  .cost-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+  .cost-row-label { color: var(--text-3); font-size: 10px; letter-spacing: 0.3px; }
+  .cost-row-val { color: var(--text-2); font-size: 11px; }
+  .cost-row-val.amber { color: var(--amber); font-weight: 600; }
+  .cost-row-val.green { color: var(--green); }
+  .cost-divider { height: 1px; background: var(--border); margin: 2px 0; }
+  .cost-model-tag {
+    font-size: 9px; padding: 1px 6px; border-radius: 100px;
+    background: var(--amber-dim); border: 1px solid rgba(255,183,134,0.2);
+    color: var(--amber); letter-spacing: 0.3px; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; max-width: 130px;
+  }
+  .cost-reset-btn {
+    width: 100%; background: none; border: 1px solid var(--border); color: var(--text-3);
+    font-family: var(--mono); font-size: 9px; padding: 4px; border-radius: var(--radius);
+    cursor: pointer; margin-top: 2px; transition: all 0.15s; letter-spacing: 0.5px;
+  }
+  .cost-reset-btn:hover { border-color: var(--red); color: var(--red); }
+
+  /* Tooltip */
+  [data-tip] { position: relative; }
+  [data-tip]:hover::after {
+    content: attr(data-tip);
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--surface-3);
+    border: 1px solid var(--border-hi);
+    color: var(--text);
+    font-size: 10px;
+    padding: 4px 8px;
+    border-radius: var(--radius);
+    white-space: nowrap;
+    z-index: 100;
+    pointer-events: none;
+  }
+
+  /* Cloud resolve status */
+  .cloud-hint { padding: 4px 12px 2px; font-size: 10px; line-height: 1.6; color: var(--text-2); }
+
+  /* Gen controls row */
+  .gen-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+<div class="noise"></div>
+
+<div class="layout">
+
+  <!-- TOPBAR -->
+  <header class="topbar">
+    <div class="brand">RAG OS<sub>v6.2</sub></div>
+    <div class="topbar-meta">
+      <div class="chip">
+        <span class="dot" id="statusDot"></span>
+        <span id="statusText">No documents</span>
+      </div>
+      <div class="chip">
+        <span style="color:var(--text-3)">chunks</span>
+        <span style="color:var(--amber);font-weight:600" id="chunkCount">0</span>
+      </div>
+      <div class="chip">
+        <span style="color:var(--text-3)">docs</span>
+        <span style="color:var(--amber);font-weight:600" id="docCount">0</span>
+      </div>
+      <div class="chip embed-chip" onclick="initEmbeddings()" title="Click to load embedding model">
+        <span class="dot dim" id="embedStatusDot"></span>
+        <span id="embedStatus" style="color:var(--text-3);font-size:10px">○ Embeddings</span>
+      </div>
+      <button class="debug-toggle" id="debugToggle" onclick="toggleDebugMode()">
+        <span class="d-dot"></span>DEBUG
+      </button>
+    </div>
+  </header>
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <!-- API Key -->
+    <div class="sidebar-section" style="padding:10px 12px">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span class="api-key-label">API KEY</span>
+        <input type="password" id="ragApiKey" value="key-user1" class="api-key-input" oninput="apiKey=this.value" />
+      </div>
+    </div>
+
+    <!-- Ingest files -->
+    <div class="sidebar-section">
+      <div class="section-label">Knowledge Base</div>
+
+      <div class="drop-zone" id="dropZone">
+        <input type="file" id="fileInput" accept=".txt,.md,.csv,.tsv,.json,.pdf,.docx,.xlsx" multiple />
+        <span class="dz-icon">📄</span>
+        <p>Drop <strong>.txt / .md / .pdf / .docx / .csv / .xlsx</strong><br/>or click to browse</p>
+      </div>
+
+      <div class="paste-wrap">
+        <span class="paste-label">Or paste text</span>
+        <textarea id="pasteText" class="paste-ta" placeholder="Paste document content here..."></textarea>
+      </div>
+
+      <div class="btn-row">
+        <button class="obs-btn primary" onclick="addPastedText()" style="flex:1">+ Add Text</button>
+        <button class="obs-btn sm danger" onclick="clearAll()" data-tip="Clear all documents">✕ Clear</button>
+      </div>
+
+      <!-- Web / YouTube ingest -->
+      <div class="ingest-section">
+        <div class="ingest-tabs">
+          <button class="itab active" id="itabUrl" onclick="switchIngest('url')">🌐 Web URL</button>
+          <button class="itab" id="itabYt" onclick="switchIngest('yt')">▶ YouTube</button>
+        </div>
+        <div class="ingest-panel active" id="ingestUrl">
+          <input class="obs-input" id="urlInput" placeholder="https://example.com/article" />
+          <span class="ingest-hint">Fetches & strips page text via proxy</span>
+          <button class="obs-btn primary sm" onclick="ingestUrl()" style="width:100%">⬇ Fetch Page</button>
+        </div>
+        <div class="ingest-panel" id="ingestYt">
+          <input class="obs-input" id="ytInput" placeholder="YouTube URL or video ID" />
+          <span class="ingest-hint">Extracts auto-generated captions</span>
+          <button class="obs-btn primary sm" onclick="ingestYoutube()" style="width:100%">⬇ Get Transcript</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Progress & Alerts -->
+    <div class="progress-bar" id="progressBar"><div class="progress-fill" id="progressFill"></div></div>
+    <div class="alert" id="sideAlert"></div>
+
+    <!-- Doc list -->
+    <div class="sidebar-section" style="padding-bottom:0;border-bottom:none">
+      <div class="section-label">Documents</div>
+      <div class="doc-list" id="docList">
+        <div class="empty-docs" id="emptyDocs">No documents yet.<br/>Upload or paste to begin.</div>
+      </div>
+    </div>
+
+    <!-- Config: chunk settings -->
+    <div class="config-row">
+      <span class="config-label">Chunk</span>
+      <input type="number" class="config-input" id="chunkSize" value="300" min="50" max="1000" data-tip="Chunk size (words)" />
+      <span class="config-label">Overlap</span>
+      <input type="number" class="config-input" id="chunkOverlap" value="50" min="0" max="200" data-tip="Overlap (words)" />
+    </div>
+
+    <!-- Backend switcher -->
+    <div class="backend-tabs">
+      <button class="btab active" id="tabLocal" onclick="switchBackend('local')">🖥 Local</button>
+      <button class="btab" id="tabCloud" onclick="switchBackend('cloud')">☁ Cloud</button>
+    </div>
+
+    <!-- Local panel -->
+    <div id="localPanel">
+      <div class="api-key-row">
+        <span class="api-key-label">MODEL</span>
+        <select class="api-key-input" id="ollamaModel" style="cursor:pointer">
+          <option value="">-- run: ollama list --</option>
+          <option value="claude">claude (minimax cloud)</option>
+          <option value="custom">✎ Custom</option>
+        </select>
+      </div>
+      <div class="api-key-row">
+        <span class="api-key-label">URL</span>
+        <input type="text" class="api-key-input" id="ollamaUrl" value="http://localhost:11434" />
+      </div>
+      <div class="api-key-row" id="customModelRow" style="display:none">
+        <span class="api-key-label">CUSTOM</span>
+        <input type="text" class="api-key-input" id="customModel" placeholder="e.g., my-model" />
+      </div>
+
+      <div class="terminal-wrap">
+        <div class="terminal-titlebar">
+          <span class="term-dot dot-r"></span>
+          <span class="term-dot dot-y"></span>
+          <span class="term-dot dot-g"></span>
+          <span class="term-title">Ollama Terminal</span>
+        </div>
+        <div class="terminal-output" id="termOutput">
+          <div class="term-line"><span class="term-out info">Ollama Terminal — type commands below</span></div>
+          <div class="term-line"><span class="term-out" style="color:var(--border-hi)">────────────────────────────────</span></div>
+        </div>
+        <div class="term-help" id="termHelp">
+          <span class="term-chip" onclick="termQuick('ollama launch claude')" style="border-color:rgba(255,183,134,0.3);color:var(--amber)">☁ run claude</span>
+          <span class="term-chip" onclick="termQuick('ollama list')">ollama list</span>
+          <span class="term-chip" onclick="termQuick('ollama pull llama3.2')">pull llama3.2</span>
+          <span class="term-chip" onclick="termQuick('ollama pull mistral')">pull mistral</span>
+          <span class="term-chip" onclick="termQuick('ollama pull phi4')">pull phi4</span>
+          <span class="term-chip" onclick="termQuick('ollama ps')">ollama ps</span>
+          <span class="term-chip" onclick="termQuick('help')">help</span>
+        </div>
+        <div class="terminal-input-row">
+          <span class="term-input-prompt">PS></span>
+          <input class="term-input" id="termInput" placeholder="ollama list" spellcheck="false" autocomplete="off" />
+          <button class="term-run-btn" onclick="runTermCmd()">↵ Run</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Cloud panel -->
+    <div id="cloudPanel" style="display:none">
+      <div class="api-key-row">
+        <span class="api-key-label">PROVIDER</span>
+        <select class="api-key-input" id="cloudProvider" style="cursor:pointer" onchange="onProviderChange()">
+          <option value="auto">Auto detect</option>
+          <option value="groq">Groq (Free ✓)</option>
+          <option value="together">Together AI</option>
+          <option value="openai">OpenAI</option>
+          <option value="openrouter">OpenRouter</option>
+          <option value="custom">Custom</option>
+        </select>
+      </div>
+      <div class="api-key-row">
+        <span class="api-key-label">MODEL</span>
+        <select class="api-key-input" id="cloudModel" style="cursor:pointer">
+          <option value="">Auto-select</option>
+        </select>
+      </div>
+      <div class="api-key-row">
+        <span class="api-key-label">API KEY</span>
+        <input type="password" class="api-key-input" id="cloudApiKey" placeholder="Paste your key..." />
+      </div>
+      <div class="api-key-row" id="customUrlRow" style="display:none">
+        <span class="api-key-label">BASE URL</span>
+        <input type="text" class="api-key-input" id="customCloudUrl" placeholder="https://..." />
+      </div>
+      <div class="api-key-row" id="customModelRowCloud" style="display:none">
+        <span class="api-key-label">MODEL</span>
+        <input type="text" class="api-key-input" id="cloudCustomModel" placeholder="anthropic/claude-3-sonnet" />
+      </div>
+      <div class="cloud-hint" id="cloudResolveStatus">Auto-detect waits for your API key.</div>
+      <div style="padding:4px 12px 10px">
+        <a href="#" id="providerSignupLink" style="font-size:10px;color:var(--amber);display:block;padding:2px 0 6px" target="_blank">→ Get free API key</a>
+        <button class="obs-btn sm" onclick="testCloud()" style="width:100%">⚡ Test Connection</button>
+      </div>
+    </div>
+
+    <div class="sidebar-footer">
+      <div style="font-size:9px;color:var(--text-3);text-align:center;line-height:1.8">
+        BM25 + TF-IDF + Embeddings<br/>Hybrid Retrieval Engine
+      </div>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="main">
+    <!-- Doc panel above chat -->
+    <div class="doc-panel" id="docPanel" style="display:none">
+      <div class="doc-panel-header" id="docPanelHeader" onclick="toggleDocPanel()">
+        <span>📚 Knowledge Base</span>
+        <span class="doc-panel-count" id="docPanelCount">0 docs</span>
+        <span class="doc-panel-toggle">▼</span>
+      </div>
+      <div class="doc-panel-grid" id="docPanelGrid"></div>
+    </div>
+
+    <!-- Chat messages -->
+    <div class="chat-messages" id="chatMessages">
+      <div class="welcome" id="welcomeMsg">
+        <h2>Ask anything<br/><em>from your docs</em></h2>
+        <p>Upload documents to your knowledge base, then ask questions. The system retrieves the most relevant chunks and generates precise answers.</p>
+        <div class="steps">
+          <div class="step"><span class="step-n">01</span><span>Upload .txt, .md, .csv, or .json — or paste text directly</span></div>
+          <div class="step"><span class="step-n">02</span><span>Docs are chunked with adaptive sizing</span></div>
+          <div class="step"><span class="step-n">03</span><span>Hybrid BM25 + TF-IDF + Embeddings retrieval</span></div>
+          <div class="step"><span class="step-n">04</span><span>LLM synthesizes an answer grounded in your documents</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Input area -->
+    <div class="input-area">
+      <div class="input-row">
+        <div class="input-wrapper">
+          <textarea class="query-input" id="queryInput" placeholder="Ask a question about your documents... (Enter to send)" rows="1"></textarea>
+        </div>
+        <button class="obs-btn primary" id="sendBtn" onclick="sendQuery()" disabled style="padding:10px 20px;height:44px">Ask →</button>
+      </div>
+      <div class="input-meta">
+        <div class="top-k-row">
+          <span>Retrieve top</span>
+          <input type="number" class="config-input" id="topK" value="4" min="1" max="10" style="width:46px" />
+          <span>chunks</span>
+        </div>
+        <span style="color:var(--border-hi)">·</span>
+        <span id="inputHint">Load documents to begin</span>
+      </div>
+      <div class="input-meta gen-controls">
+        <select class="gen-select" id="promptTemplate">
+          <option value="strict">⚡ Strict Q&A</option>
+          <option value="summarizer">📋 Summarizer</option>
+          <option value="expert">🔬 Expert Analysis</option>
+          <option value="bullets">• Bullet Points</option>
+          <option value="analyst">📊 Data Analyst</option>
+        </select>
+        <span style="color:var(--border-hi)">·</span>
+        <span class="config-label">Temp</span>
+        <input type="range" class="temp-slider" id="tempSlider" min="0" max="1" step="0.1" value="0.7" oninput="document.getElementById('tempVal').textContent=this.value" />
+        <span class="temp-val" id="tempVal">0.7</span>
+        <span style="color:var(--border-hi)">·</span>
+        <span class="config-label">Tokens</span>
+        <input type="number" class="config-input" id="maxTokens" value="1000" min="100" max="4000" style="width:56px" />
+      </div>
+    </div>
+  </main>
+
+</div>
+
+<!-- COST TRACKER -->
+<div id="costTracker" class="collapsed">
+  <div class="cost-titlebar" onclick="toggleCostTracker()">
+    <span style="font-size:12px">💰</span>
+    <span class="cost-titlebar-label">Session Cost</span>
+    <span class="cost-total" id="ctTotalCost">$0.0000</span>
+    <span class="cost-chevron">▲</span>
+  </div>
+  <div id="costBody">
+    <div class="cost-row">
+      <span class="cost-row-label">Model</span>
+      <span class="cost-model-tag" id="ctModel">—</span>
+    </div>
+    <div class="cost-divider"></div>
+    <div class="cost-row">
+      <span class="cost-row-label">API Calls</span>
+      <span class="cost-row-val" id="ctCalls">0</span>
+    </div>
+    <div class="cost-row">
+      <span class="cost-row-label">Table Queries</span>
+      <span class="cost-row-val" id="ctTableQueries">0</span>
+    </div>
+    <div class="cost-row">
+      <span class="cost-row-label">Input Tokens</span>
+      <span class="cost-row-val" id="ctInputTok">0</span>
+    </div>
+    <div class="cost-row">
+      <span class="cost-row-label">Output Tokens</span>
+      <span class="cost-row-val" id="ctOutputTok">0</span>
+    </div>
+    <div class="cost-row" title="Messages dropped to stay in budget">
+      <span class="cost-row-label">Ctx Trimmed</span>
+      <span class="cost-row-val" id="ctTrimmed" style="color:var(--text-3)">—</span>
+    </div>
+    <div class="cost-row">
+      <span class="cost-row-label">Input Cost</span>
+      <span class="cost-row-val amber" id="ctInputCost">$0.0000</span>
+    </div>
+    <div class="cost-row">
+      <span class="cost-row-label">Output Cost</span>
+      <span class="cost-row-val amber" id="ctOutputCost">$0.0000</span>
+    </div>
+    <div class="cost-divider"></div>
+    <div class="cost-row">
+      <span class="cost-row-label">Total</span>
+      <span class="cost-row-val green" id="ctTotal2">$0.0000</span>
+    </div>
+    <button class="cost-reset-btn" onclick="resetCostTracker()">↺ Reset Session</button>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// STATE
+// ============================================================
+let apiKey = 'key-user1';
+
+const state = {
+  docs: [],
+  chunks: [],
+  chatHistory: [],
+  debugMode: false,
+  isSending: false,
+  session: {
+    calls: 0,
+    tableQueries: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    inputCost: 0,
+    outputCost: 0,
+    cost: 0,
+    lastHistoryTrimmed: 0,
+    lastModel: ''
+  }
+};
+
+function getAuthHeaders() {
+  return apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {};
+}
+
+function handleAuthError(resp) {
+  if (resp.status === 401) {
+    showAlert('Invalid API key — check your key and try again', 'error');
+    return true;
+  }
+  return false;
+}
+
+// ============================================================
+// FIX #6: Adaptive chunk sizing per doc
+// ============================================================
+function autoChunkSize(text) {
+  const words = text.split(/\s+/).length;
+  if (words > 50000) return { size: 600, overlap: 100 };
+  if (words > 10000) return { size: 400, overlap: 75 };
+  return { size: 300, overlap: 50 };
+}
+
+// FIX #1: Only ONE tokenize function (with stopwords)
+const STOPWORDS = new Set([
+  'the','a','an','and','or','but','in','on','at','to','for','of','with',
+  'is','are','was','were','be','been','being','have','has','had','do',
+  'does','did','will','would','could','should','may','might','shall',
+  'i','you','he','she','it','we','they','this','that','these','those',
+  'not','no','if','as','by','from','up','about','into','through','then',
+  'than','so','what','which','who','how','all','each','more','also'
+]);
+
+function tokenize(text) {
+  return text.toLowerCase()
+    .split(/\W+/)
+    .filter(t => t.length > 1 && !STOPWORDS.has(t));
+}
+
+function chunkDocument(doc, forceSize, forceOverlap) {
+  const auto = autoChunkSize(doc.text);
+  const chunkSize = (forceSize ?? parseInt(document.getElementById('chunkSize').value)) || auto.size;
+  const overlap = (forceOverlap ?? parseInt(document.getElementById('chunkOverlap').value)) || auto.overlap;
+  const words = doc.text.split(/\s+/).filter(Boolean);
+  const chunks = [];
+  let i = 0;
+
+  while (i < words.length) {
+    const slice = words.slice(i, i + chunkSize);
+    if (slice.length < 10 && chunks.length > 0) {
+      chunks[chunks.length - 1].text += ' ' + slice.join(' ');
+      break;
+    }
+    chunks.push({
+      id: `${doc.id}_${chunks.length}`,
+      docId: doc.id,
+      docName: doc.name,
+      text: slice.join(' '),
+      tokens: null
+    });
+    i += chunkSize - overlap;
+  }
+  return chunks;
+}
+
+// Yield control back to browser â€” prevents UI freeze during heavy indexing
+const yieldToUI = () => new Promise(r => setTimeout(r, 0));
+let rebuildVersion = 0;
+
+async function rebuildChunks() {
+  const version = ++rebuildVersion;
+  const nextChunks = [];
+  for (const doc of state.docs) {
+    nextChunks.push(...chunkDocument(doc));
+  }
+
+  // Process tokens + TF in batches, yielding to UI between each
+  const BATCH = 25;
+  for (let i = 0; i < nextChunks.length; i += BATCH) {
+    const end = Math.min(i + BATCH, nextChunks.length);
+    for (let j = i; j < end; j++) {
+      const c = nextChunks[j];
+      c.tokens = tokenize(c.text);
+      c.tf     = buildTF(c.tokens);
+      c.tf_raw = buildTF_raw(c.tokens);
+    }
+    await yieldToUI(); // let browser paint between batches
+    if (version !== rebuildVersion) return;
+  }
+
+  const stats = computeIDF(nextChunks);
+  for (let i = 0; i < nextChunks.length; i += BATCH) {
+    const end = Math.min(i + BATCH, nextChunks.length);
+    for (let j = i; j < end; j++) {
+      nextChunks[j].tfidfVec = tfidfVector(nextChunks[j].tokens, stats.idf);
+    }
+    await yieldToUI();
+    if (version !== rebuildVersion) return;
+  }
+
+  state.chunks = nextChunks;
+  idf = stats.idf;
+  avgDocLen = stats.avgDocLen;
+  const liveIds = new Set(nextChunks.map(c => c.id));
+  for (const key of Array.from(embedState.cache.keys())) {
+    if (!liveIds.has(key)) embedState.cache.delete(key);
+  }
+  embedState.qCache.clear();
+  updateStats();
+  scheduleEmbedChunks();
+}
+
+// ============================================================
+// HYBRID RETRIEVAL: BM25 + TF-IDF + Embeddings (Single-pass 3-way RRF)
+// ============================================================
+const BM25_K1 = 1.5;
+const BM25_B  = 0.75;
+
+let idf = {};
+let avgDocLen = 0;
+
+const BM25_WEIGHT  = 0.45;
+const TFIDF_WEIGHT = 0.25;
+const EMBED_WEIGHT = 0.30;
+
+const RRF_K = 60;
+
+function buildTF_raw(tokens) {
+  const tf = {};
+  tokens.forEach(t => { tf[t] = (tf[t] || 0) + 1; });
+  return tf;
+}
+
+function buildTF(tokens) {
+  const tf = buildTF_raw(tokens);
+  let max = 1;
+  for (const v of Object.values(tf)) { if (v > max) max = v; }
+  for (const k of Object.keys(tf)) tf[k] /= max;
+  return tf;
+}
+
+function computeIDF(chunks = state.chunks) {
+  const nextIdf = {};
+  const N = chunks.length;
+  if (N === 0) return { idf: nextIdf, avgDocLen: 0 };
+  const df = {};
+  chunks.forEach(c => {
+    const uniq = new Set(c.tokens);
+    uniq.forEach(t => { df[t] = (df[t] || 0) + 1; });
+  });
+  Object.keys(df).forEach(t => {
+    nextIdf[t] = Math.log((N - df[t] + 0.5) / (df[t] + 0.5) + 1);
+  });
+  return {
+    idf: nextIdf,
+    avgDocLen: chunks.reduce((sum, c) => sum + c.tokens.length, 0) / N
+  };
+}
+
+function bm25Score(chunk, qTokens) {
+  const tf_raw = chunk.tf_raw;
+  const dl = chunk.tokens.length;
+  let score = 0;
+  const seen = new Set();
+  for (const t of qTokens) {
+    if (seen.has(t)) continue;
+    seen.add(t);
+    const freq = tf_raw[t] || 0;
+    if (freq === 0) continue;
+    const idf_t = idf[t] || 0;
+    const tf_norm = (freq * (BM25_K1 + 1)) /
+      (freq + BM25_K1 * (1 - BM25_B + BM25_B * (dl / (avgDocLen || 1))));
+    score += idf_t * tf_norm;
+  }
+  return score;
+}
+
+function tfidfVector(tokens, idfMap = idf) {
+  const tf = buildTF(tokens);
+  const vec = {};
+  Object.keys(tf).forEach(t => { vec[t] = tf[t] * (idfMap[t] || 1); });
+  return vec;
+}
+
+function cosineSim(a, b) {
+  let dot = 0, normA = 0, normB = 0;
+  for (const k in a) { const va = a[k]; normA += va * va; if (b[k]) dot += va * b[k]; }
+  for (const k in b) { const vb = b[k]; normB += vb * vb; }
+  return normA && normB ? dot / (Math.sqrt(normA) * Math.sqrt(normB)) : 0;
+}
+
+function keywordPrefilter(chunks, qTokens, minOverlap = 1) {
+  const qSet = new Set(qTokens);
+  return chunks.filter(c => {
+    let overlap = 0;
+    for (const t of c.tokens) {
+      if (qSet.has(t)) { overlap++; if (overlap >= minOverlap) return true; }
+    }
+    return false;
+  });
+}
+
+// FIX #3: Single-pass 3-way RRF - no double counting
+function rrf3way(bm25Ranked, tfidfRanked, embedRanked) {
+  const scores = new Map();
+  const add = (list, weight) => list.forEach((item, idx) => {
+    const id = item.chunk.id;
+    if (!scores.has(id)) scores.set(id, { chunk: item.chunk, score: 0 });
+    scores.get(id).score += weight * (1 / (RRF_K + idx + 1));
+  });
+  add(bm25Ranked,  BM25_WEIGHT);
+  add(tfidfRanked, TFIDF_WEIGHT);
+  add(embedRanked, EMBED_WEIGHT);
+  return Array.from(scores.values()).sort((a, b) => b.score - a.score);
+}
+
+// Fallback 2-way RRF when embeddings unavailable
+function rrf2way(bm25Ranked, tfidfRanked) {
+  const scores = new Map();
+  const add = (list, weight) => list.forEach((item, idx) => {
+    const id = item.chunk.id;
+    if (!scores.has(id)) scores.set(id, { chunk: item.chunk, score: 0 });
+    scores.get(id).score += weight * (1 / (RRF_K + idx + 1));
+  });
+  add(bm25Ranked,  0.65);
+  add(tfidfRanked, 0.35);
+  return Array.from(scores.values()).sort((a, b) => b.score - a.score);
+}
+
+// ============================================================
+// EMBEDDING ENGINE
+// ============================================================
+// EMBEDDING ENGINE — Web Worker edition
+//
+// DROP-IN REPLACEMENT for the "EMBEDDING ENGINE" script block
+// in rag_project_v6_2.html.
+//
+// HOW TO USE:
+//   Option A (recommended): Place embed.worker.js next to the HTML file.
+//     The code below uses it as an external module worker.
+//
+//   Option B (single-file / no server):
+//     Replace the WORKER_SRC string below with the full contents of
+//     embed.worker.js, then use the Blob URL path (see comment inside).
+//
+// What changed vs the old implementation:
+//   • ONNX inference runs in a Worker — zero main-thread blocking
+//   • Batch embedding streams results back one-by-one → live progress bar
+//   • ArrayBuffer transfer (zero-copy) across thread boundary
+//   • Single-query embedding also goes through the worker
+//   • All the old public API is preserved: embedState, embed(), embedChunks(),
+//     scheduleEmbedChunks(), initEmbeddings(), updateEmbedStatus()
+// ============================================================
+
+// ── WORKER SETUP ─────────────────────────────────────────────────────────────
+
+// Option A — external file (needs a local server or same-origin hosting):
+const _embedWorker = new Worker('./embed.worker.js', { type: 'module' });
+
+// Option B — inline Blob worker (works with file:// and CDN-only setups).
+// Uncomment this block and remove the line above if you have no server:
+/*
+const WORKER_SRC = `
+import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/dist/transformers.min.js';
+env.allowLocalModels = false;
+let pipe = null, loading = false;
+async function loadPipe() {
+  if (pipe) return pipe;
+  if (loading) { await new Promise(r => { const t = setInterval(() => { if (pipe || !loading) { clearInterval(t); r(); } }, 50); }); return pipe; }
+  loading = true;
+  pipe = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', { quantized: true, progress_callback: (p) => { if (p.status === 'downloading') self.postMessage({ type: 'download_progress', progress: p.progress ? Math.round(p.progress) : 0 }); } });
+  loading = false; return pipe;
+}
+async function embedText(text) { const p = await loadPipe(); const out = await p(text, { pooling: 'mean', normalize: true }); return out.data instanceof Float32Array ? out.data : new Float32Array(out.data); }
+self.onmessage = async (e) => {
+  const { type, id, text, chunks } = e.data;
+  if (type === 'load') { try { await loadPipe(); self.postMessage({ type: 'ready' }); } catch (err) { self.postMessage({ type: 'error', error: err.message }); } return; }
+  if (type === 'embed') { try { const vec = await embedText(text); self.postMessage({ type: 'result', id, vec }, [vec.buffer]); } catch (err) { self.postMessage({ type: 'error', id, error: err.message }); } return; }
+  if (type === 'embed_batch') { const total = chunks.length; for (let i = 0; i < total; i++) { try { const vec = await embedText(chunks[i].text); self.postMessage({ type: 'batch_result', id: chunks[i].id, index: i, total, vec }, [vec.buffer]); } catch (err) { self.postMessage({ type: 'batch_error', id: chunks[i].id, index: i, error: err.message }); } } self.postMessage({ type: 'batch_done' }); return; }
+};
+`;
+const _blob = new Blob([WORKER_SRC], { type: 'application/javascript' });
+const _embedWorker = new Worker(URL.createObjectURL(_blob), { type: 'module' });
+*/
+
+// ── EMBED STATE ───────────────────────────────────────────────────────────────
+
+const embedState = {
+  ready:   false,
+  loading: false,
+  cache:   new Map(),   // chunkId → Float32Array
+  qCache:  new Map(),   // queryText → Float32Array
+
+  // Pending single-embed promises: messageId → { resolve, reject }
+  _pending: new Map(),
+  _msgId: 0,
+
+  // Pending batch: resolve/reject for the current batch operation
+  _batchResolve: null,
+  _batchReject:  null,
+};
+
+// ── WORKER MESSAGE ROUTER ─────────────────────────────────────────────────────
+
+_embedWorker.onmessage = (e) => {
+  const msg = e.data;
+
+  switch (msg.type) {
+
+    case 'ready':
+      embedState.ready   = true;
+      embedState.loading = false;
+      updateEmbedStatus('ready');
+      break;
+
+    case 'download_progress':
+      updateEmbedStatus(`downloading ${msg.progress}%`);
+      break;
+
+    case 'result': {
+      // Single embed response
+      const cb = embedState._pending.get(msg.id);
+      if (cb) {
+        embedState._pending.delete(msg.id);
+        cb.resolve(msg.vec);
+      }
+      break;
+    }
+
+    case 'batch_result': {
+      // One chunk finished — store result and update progress bar
+      embedState.cache.set(msg.id, msg.vec);
+      const pct = Math.round(((msg.index + 1) / msg.total) * 100);
+      _updateBatchProgress(msg.index + 1, msg.total, pct);
+      break;
+    }
+
+    case 'batch_error':
+      // Log but don't abort — other chunks continue
+      console.warn('[embed worker] batch error for chunk', msg.id, msg.error);
+      break;
+
+    case 'batch_done':
+      _finishBatch();
+      break;
+
+    case 'error': {
+      embedState.loading = false;
+      if (msg.id !== undefined) {
+        const cb = embedState._pending.get(msg.id);
+        if (cb) { embedState._pending.delete(msg.id); cb.reject(new Error(msg.error)); }
+      } else {
+        // Load error
+        updateEmbedStatus('failed');
+        console.error('[embed worker] error:', msg.error);
+        if (embedState._batchReject) { embedState._batchReject(new Error(msg.error)); embedState._batchReject = null; }
+      }
+      break;
+    }
+  }
+};
+
+_embedWorker.onerror = (err) => {
+  console.error('[embed worker] uncaught error:', err);
+  embedState.loading = false;
+  updateEmbedStatus('failed');
+};
+
+// ── PROGRESS HELPERS ─────────────────────────────────────────────────────────
+
+function _updateBatchProgress(done, total, pct) {
+  const fill = document.getElementById('progressFill');
+  const bar  = document.getElementById('progressBar');
+  if (fill) fill.style.width = `${pct}%`;
+  if (bar)  bar.classList.add('visible');
+  updateEmbedStatus(`embedding ${done}/${total} (${pct}%)`);
+}
+
+function _finishBatch() {
+  const bar  = document.getElementById('progressBar');
+  const fill = document.getElementById('progressFill');
+  if (bar)  bar.classList.remove('visible');
+  if (fill) fill.style.width = '0%';
+  updateEmbedStatus('ready');
+  if (embedState._batchResolve) {
+    embedState._batchResolve();
+    embedState._batchResolve = null;
+    embedState._batchReject  = null;
+  }
+}
+
+// ── PUBLIC API ────────────────────────────────────────────────────────────────
+
+function updateEmbedStatus(status) {
+  const el = document.getElementById('embedStatus');
+  const dot = document.getElementById('embedStatusDot');
+  if (!el) return;
+  const labels = {
+    idle:        { text: '○ Embeddings',      color: 'var(--text-3)',   dotClass: 'dim'   },
+    loading:     { text: '⟳ Loading…',        color: 'var(--amber)',    dotClass: 'amber' },
+    downloading: { text: '⬇ Downloading…',    color: 'var(--amber)',    dotClass: 'amber' },
+    ready:       { text: '● Embeddings on',   color: 'var(--green)',    dotClass: 'green' },
+    failed:      { text: '✕ Embeddings off',  color: 'var(--red)',      dotClass: 'dim'   },
+  };
+  const key = status.startsWith('downloading') || status.startsWith('embedding')
+    ? (status.startsWith('downloading') ? 'downloading' : 'loading')
+    : status;
+  const cfg = labels[key] || labels.idle;
+  el.style.color = cfg.color;
+  el.textContent = (status.startsWith('embedding') || status.startsWith('downloading'))
+    ? status
+    : cfg.text;
+  if (dot) { dot.className = 'dot ' + (cfg.dotClass || 'dim'); }
+}
+
+// Kick off worker model load (non-blocking)
+async function getEmbedPipe() {
+  if (embedState.ready) return true;
+  if (embedState.loading) {
+    await new Promise(r => {
+      const t = setInterval(() => {
+        if (embedState.ready || !embedState.loading) { clearInterval(t); r(); }
+      }, 100);
+    });
+    return embedState.ready;
+  }
+  embedState.loading = true;
+  updateEmbedStatus('loading');
+  _embedWorker.postMessage({ type: 'load' });
+  // wait for 'ready' or 'error' message handled above
+  await new Promise(r => {
+    const t = setInterval(() => {
+      if (embedState.ready || !embedState.loading) { clearInterval(t); r(); }
+    }, 100);
+  });
+  return embedState.ready;
+}
+
+// Single text → Float32Array (goes through worker)
+async function embed(text) {
+  const ok = await getEmbedPipe();
+  if (!ok) return null;
+  const id = ++embedState._msgId;
+  return new Promise((resolve, reject) => {
+    embedState._pending.set(id, { resolve, reject });
+    _embedWorker.postMessage({ type: 'embed', id, text });
+  });
+}
+
+// Embed a Float32Array query — caches result
+async function embedQuery(text) {
+  if (embedState.qCache.has(text)) return embedState.qCache.get(text);
+  const vec = await embed(text);
+  if (vec) embedState.qCache.set(text, vec);
+  return vec;
+}
+
+// Batch-embed all uncached chunks via worker (non-blocking, progress bar shown)
+async function embedChunks(chunks) {
+  const ok = await getEmbedPipe();
+  if (!ok) return;
+
+  const uncached = chunks.filter(c => !embedState.cache.has(c.id));
+  if (!uncached.length) return;
+
+  // Show progress bar immediately
+  const bar  = document.getElementById('progressBar');
+  const fill = document.getElementById('progressFill');
+  if (bar)  bar.classList.add('visible');
+  if (fill) fill.style.width = '0%';
+  updateEmbedStatus(`embedding 0/${uncached.length} (0%)`);
+
+  await new Promise((resolve, reject) => {
+    embedState._batchResolve = resolve;
+    embedState._batchReject  = reject;
+    // Send all chunk ids+texts to the worker in one message
+    _embedWorker.postMessage({
+      type: 'embed_batch',
+      chunks: uncached.map(c => ({ id: c.id, text: c.text }))
+    });
+  });
+}
+
+function scheduleEmbedChunks() {
+  // Push to next task so the doc list renders before embedding starts
+  setTimeout(() => {
+    if (!embedState.ready && !embedState.loading) {
+      getEmbedPipe().then(() => embedChunks(state.chunks));
+    } else if (embedState.ready) {
+      embedChunks(state.chunks);
+    }
+  }, 150);
+}
+
+async function initEmbeddings() {
+  if (embedState.ready)   { showAlert('Embedding model already loaded ✓', 'warn'); return; }
+  if (embedState.loading) { showAlert('Model is loading…', 'warn'); return; }
+  showAlert('Loading embedding model (~22MB)…', 'warn');
+  const ok = await getEmbedPipe();
+  if (ok && state.chunks.length > 0) {
+    showAlert('Embedding chunks…', 'warn');
+    await embedChunks(state.chunks);
+    showAlert(`✓ Embeddings ready — ${state.chunks.length} chunks indexed`, 'warn');
+  }
+}
+
+// ── COSINE SIMILARITY (unchanged) ────────────────────────────────────────────
+
+function embedCosineSim(a, b) {
+  if (!a || !b || a.length !== b.length) return 0;
+  let dot = 0, na = 0, nb = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    na  += a[i] * a[i];
+    nb  += b[i] * b[i];
+  }
+  return (na && nb) ? dot / (Math.sqrt(na) * Math.sqrt(nb)) : 0;
+}
+
+// ── RETRIEVE: patch embed() calls to use embedQuery() ────────────────────────
+// In the existing retrieve() function, replace:
+//
+//   let qEmbed = embedState.qCache.get(query);
+//   if (!qEmbed) {
+//     qEmbed = await embed(query);
+//     if (qEmbed) embedState.qCache.set(query, qEmbed);
+//   }
+//
+// with:
+//
+//   const qEmbed = await embedQuery(query);
+//
+// Everything else in retrieve() stays identical.
+
+// MMR with FIX #7: Embedding-based similarity when available
+// ============================================================
+const MMR_LAMBDA = 0.6;
+
+function chunkSimilarity(a, b) {
+  // Use embeddings when available (much more accurate)
+  const vecA = embedState.cache.get(a.id);
+  const vecB = embedState.cache.get(b.id);
+  if (vecA && vecB) return embedCosineSim(vecA, vecB);
+  
+  // Fallback to Jaccard
+  const setA = new Set(a.tokens);
+  const setB = new Set(b.tokens);
+  let inter = 0;
+  for (const t of setA) if (setB.has(t)) inter++;
+  const union = setA.size + setB.size - inter;
+  return union > 0 ? inter / union : 0;
+}
+
+function mmrSelect(candidates, k) {
+  if (candidates.length <= k) return candidates;
+  const selected = [];
+  const remaining = [...candidates];
+
+  while (selected.length < k && remaining.length > 0) {
+    let bestIdx = 0;
+    let bestScore = -Infinity;
+
+    for (let i = 0; i < remaining.length; i++) {
+      const relevance = remaining[i].score;
+      let maxSim = 0;
+      for (const s of selected) {
+        const sim = chunkSimilarity(remaining[i].chunk, s.chunk);
+        if (sim > maxSim) maxSim = sim;
+      }
+      const mmrScore = MMR_LAMBDA * relevance - (1 - MMR_LAMBDA) * maxSim;
+      if (mmrScore > bestScore) {
+        bestScore = mmrScore;
+        bestIdx = i;
+      }
+    }
+    selected.push(remaining[bestIdx]);
+    remaining.splice(bestIdx, 1);
+  }
+  return selected;
+}
+
+async function retrieve(query, k = 4) {
+  if (state.chunks.length === 0) return { results: [], debug: null };
+  const qTokens = tokenize(query);
+  if (qTokens.length === 0) return {
+    results: state.chunks.slice(0, k).map(c => ({ chunk: c, score: 0 })),
+    debug: null
+  };
+
+  let candidates = keywordPrefilter(state.chunks, qTokens);
+  const prefilterCount = candidates.length;
+  if (candidates.length < k) candidates = state.chunks;
+
+  const bm25Ranked = candidates
+    .map(c => ({ chunk: c, score: bm25Score(c, qTokens) }))
+    .sort((a, b) => b.score - a.score);
+
+  const qVec = tfidfVector(qTokens);
+  const tfidfRanked = candidates
+    .map(c => ({ chunk: c, score: c.tfidfVec ? cosineSim(qVec, c.tfidfVec) : 0 }))
+    .sort((a, b) => b.score - a.score);
+
+  let embedRanked = [];
+  let embedUsed = false;
+  if (embedState.ready) {
+    try {
+      const qEmbed = await embedQuery(query);
+      if (qEmbed) {
+        embedRanked = candidates
+          .map(c => ({ chunk: c, score: embedCosineSim(qEmbed, embedState.cache.get(c.id)) }))
+          .sort((a, b) => b.score - a.score);
+        embedUsed = true;
+      }
+    } catch (e) {
+      console.warn('Embedding retrieval failed, falling back:', e);
+    }
+  }
+
+  // FIX #3: Single-pass 3-way or 2-way RRF
+  let fused;
+  if (embedUsed && embedRanked.length > 0) {
+    fused = rrf3way(bm25Ranked, tfidfRanked, embedRanked);
+  } else {
+    fused = rrf2way(bm25Ranked, tfidfRanked);
+  }
+
+  const preMMR = fused.slice(0, Math.min(k * 3, fused.length));
+  const results = mmrSelect(preMMR, k);
+
+  const maxScore = results[0]?.score || 1;
+  results.forEach(r => { r.displayScore = r.score / maxScore; });
+
+  const debug = {
+    queryTokens: qTokens,
+    totalChunks: state.chunks.length,
+    prefilterPassed: prefilterCount,
+    prefilterUsed: prefilterCount >= k,
+    embedUsed,
+    embedReady: embedState.ready,
+    bm25Top: bm25Ranked.slice(0, 5).map(r => ({
+      docName: r.chunk.docName, id: r.chunk.id, score: r.score, chunkLen: r.chunk.tokens.length
+    })),
+    tfidfTop: tfidfRanked.slice(0, 5).map(r => ({
+      docName: r.chunk.docName, id: r.chunk.id, score: r.score, chunkLen: r.chunk.tokens.length
+    })),
+    embedTop: embedUsed ? embedRanked.slice(0, 5).map(r => ({
+      docName: r.chunk.docName, id: r.chunk.id, score: r.score, chunkLen: r.chunk.tokens.length
+    })) : [],
+    preMMRCount: preMMR.length,
+    fusedTop: results.map(r => ({
+      docName: r.chunk.docName, id: r.chunk.id, rrfScore: r.score, displayScore: r.displayScore,
+      chunkLen: r.chunk.tokens.length, chunkPreview: r.chunk.text.slice(0, 60) + 'â€¦'
+    }))
+  };
+
+  const final = results.length > 0 ? results : state.chunks.slice(0, k).map(c => ({ chunk: c, score: 0, displayScore: 0 }));
+  return { results: final, debug };
+}
+
+// ============================================================
+// DOC MANAGEMENT
+// ============================================================
+async function addDoc(name, text, options = {}) {
+  const doc = { id: crypto.randomUUID(), name, text: text.trim(), table: options.table || null };
+  state.docs.push(doc);
+  if (!options.skipRebuild) await rebuildChunks();
+  renderDocList();
+  updateStats();
+
+  try {
+    const resp = await fetch('https://rag-project-v7.onrender.com/ingest', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      body: JSON.stringify({ sourceType: 'text', content: doc.text, name })
+    });
+    if (resp.status === 401) handleAuthError(resp);
+  } catch (e) {
+    // backend unavailable, local only
+  }
+}
+
+async function removeDoc(id) {
+  state.docs = state.docs.filter(d => String(d.id) !== String(id));
+  await rebuildChunks();
+  renderDocList();
+}
+
+function clearAll() {
+  rebuildVersion++;
+  state.docs = [];
+  state.chunks = [];
+  state.chatHistory = [];
+  idf = {};
+  avgDocLen = 0;
+  embedState.cache.clear();
+  embedState.qCache.clear();
+  renderDocList();
+  updateStats();
+  document.getElementById('chatMessages').innerHTML = '';
+  document.getElementById('chatMessages').appendChild(createWelcome());
+}
+
+function getDocIcon(name) {
+  const ext = name.split('.').pop().toLowerCase();
+  if (ext === 'pdf') return 'ðŸ“•';
+  if (ext === 'docx' || ext === 'doc') return 'ðŸ“˜';
+  if (ext === 'csv' || ext === 'tsv') return 'ðŸ“Š';
+  if (ext === 'xlsx' || ext === 'xls') return 'ðŸ“—';
+  if (ext === 'json') return 'ðŸ“‹';
+  if (name.includes('(web)')) return 'ðŸŒ';
+  if (name.startsWith('YouTube:')) return 'â–¶ï¸';
+  if (name.startsWith('Pasted')) return 'ðŸ“';
+  return 'ðŸ“„';
+}
+
+function toggleDocPanel() {
+  document.getElementById('docPanelHeader').classList.toggle('open');
+  document.getElementById('docPanelGrid').classList.toggle('open');
+}
+
+function escHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+// FIX #4: Use pre-computed chunks from state instead of calling chunkDocument
+function renderDocList() {
+  const list = document.getElementById('docList');
+  const panel = document.getElementById('docPanel');
+  const grid = document.getElementById('docPanelGrid');
+  const countEl = document.getElementById('docPanelCount');
+
+  if (state.docs.length === 0) {
+    list.innerHTML = '';
+    list.appendChild(Object.assign(document.createElement('div'), {
+      className: 'empty-docs',
+      innerHTML: 'No documents yet.<br/>Upload files or paste text<br/>to build your knowledge base.'
+    }));
+    panel.style.display = 'none';
+    document.getElementById('sendBtn').disabled = true;
+    document.getElementById('inputHint').textContent = 'Load documents to begin';
+    return;
+  }
+
+  // Single-pass chunk count per doc â€” O(n_chunks) not O(n_docs Ã— n_chunks)
+  const chunkCounts = {};
+  for (const c of state.chunks) chunkCounts[c.docId] = (chunkCounts[c.docId] || 0) + 1;
+
+  list.innerHTML = '';
+  state.docs.forEach(doc => {
+    const chunks = chunkCounts[doc.id] || 0;
+    const el = document.createElement('div');
+    el.className = 'doc-item';
+    el.innerHTML = `
+      <span class="doc-icon">${getDocIcon(doc.name)}</span>
+      <div class="doc-info">
+        <div class="doc-name">${escHtml(doc.name)}</div>
+        <div class="doc-meta">${doc.text.length.toLocaleString()} chars Â· ${chunks} chunks</div>
+        <div class="doc-preview">${escHtml(doc.text.slice(0, 80))}â€¦</div>
+      </div>
+      <button class="doc-del" onclick="removeDoc('${doc.id}')" title="Remove">âœ•</button>
+    `;
+    list.appendChild(el);
+  });
+
+  panel.style.display = 'block';
+  countEl.textContent = `${state.docs.length} doc${state.docs.length !== 1 ? 's' : ''} Â· ${state.chunks.length} chunks`;
+  grid.innerHTML = '';
+
+  if (state.docs.length === 1) {
+    document.getElementById('docPanelHeader').classList.add('open');
+    grid.classList.add('open');
+  }
+
+  state.docs.forEach(doc => {
+    const chunks = chunkCounts[doc.id] || 0;
+    const card = document.createElement('div');
+    card.className = 'doc-card';
+    card.innerHTML = `
+      <span class="doc-card-icon">${getDocIcon(doc.name)}</span>
+      <div class="doc-card-name" title="${escHtml(doc.name)}">${escHtml(doc.name)}</div>
+      <div class="doc-card-meta">${(doc.text.length / 1000).toFixed(1)}k chars Â· ${chunks} chunks</div>
+      <div class="doc-card-preview">${escHtml(doc.text.slice(0, 120))}â€¦</div>
+      <button class="doc-card-del" onclick="removeDoc('${doc.id}')" title="Remove">âœ•</button>
+    `;
+    grid.appendChild(card);
+  });
+
+  document.getElementById('sendBtn').disabled = false;
+  document.getElementById('inputHint').textContent = `${state.chunks.length} chunks ready`;
+}
+
+function updateStats() {
+  document.getElementById('chunkCount').textContent = state.chunks.length;
+  document.getElementById('docCount').textContent = state.docs.length;
+  const dot = document.getElementById('statusDot');
+  const txt = document.getElementById('statusText');
+  if (state.chunks.length > 0) {
+    dot.classList.add('active');
+    txt.textContent = `${state.chunks.length} chunks indexed`;
+  } else {
+    dot.classList.remove('active');
+    txt.textContent = 'No documents loaded';
+  }
+}
+
+// ============================================================
+// FILE HANDLING
+// ============================================================
+const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('dragover');
+  processFiles(e.dataTransfer.files);
+});
+
+fileInput.addEventListener('change', e => processFiles(e.target.files));
+
+async function extractDocxText(file) {
+  const arrayBuffer = await file.arrayBuffer();
+  const result = await mammoth.extractRawText({ arrayBuffer });
+  return result.value.trim();
+}
+
+function switchIngest(tab) {
+  document.getElementById('ingestUrl').classList.toggle('active', tab === 'url');
+  document.getElementById('ingestYt').classList.toggle('active', tab === 'yt');
+  document.getElementById('itabUrl').classList.toggle('active', tab === 'url');
+  document.getElementById('itabYt').classList.toggle('active', tab === 'yt');
+}
+
+async function ingestUrl() {
+  const url = document.getElementById('urlInput').value.trim();
+  if (!url) { showAlert('Enter a URL first', 'warn'); return; }
+  if (!url.startsWith('http')) { showAlert('URL must start with http:// or https://', 'error'); return; }
+  showAlert('Fetching page...', 'warn');
+
+  const proxies = [
+    `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`,
+    `https://corsproxy.io/?${encodeURIComponent(url)}`,
+    `https://thingproxy.freeboard.io/fetch/${url}`,
+  ];
+
+  let html = null;
+  for (const proxy of proxies) {
+    try {
+      const resp = await fetch(proxy, { signal: AbortSignal.timeout(8000) });
+      if (!resp.ok) continue;
+      const contentType = resp.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        const data = await resp.json().catch(() => null);
+        html = data?.contents || null;
+      } else {
+        html = await resp.text();
+      }
+      if (html && html.length > 100) break;
+    } catch(e) { continue; }
+  }
+
+  if (!html) { showAlert('âœ— All proxies failed.', 'error'); return; }
+
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+    ['script','style','nav','footer','header','aside','noscript','iframe','form'].forEach(tag =>
+      doc.querySelectorAll(tag).forEach(el => el.remove())
+    );
+    const main = doc.querySelector('main, article, [role="main"], .content, .post, .article, #content');
+    const rawText = (main || doc.body)?.textContent || '';
+    const text = rawText.replace(/\s+/g, ' ').trim();
+    if (text.length < 50) throw new Error('No readable text found');
+    const hostname = new URL(url).hostname;
+    await addDoc(`${hostname} (web)`, text);
+    document.getElementById('urlInput').value = '';
+    showAlert(`âœ“ Ingested ${(text.length / 1000).toFixed(1)}k chars from ${hostname}`, 'warn');
+  } catch(e) {
+    showAlert(`âœ— ${e.message}`, 'error');
+  }
+}
+
+async function ingestYoutube() {
+  const input = document.getElementById('ytInput').value.trim();
+  if (!input) { showAlert('Enter a YouTube URL or video ID', 'warn'); return; }
+  const match = input.match(/(?:v=|youtu\.be\/|embed\/)([a-zA-Z0-9_-]{11})/);
+  const videoId = match ? match[1] : input;
+  if (!/^[a-zA-Z0-9_-]{11}$/.test(videoId)) { showAlert('Invalid YouTube URL or video ID', 'error'); return; }
+  showAlert('Fetching transcript...', 'warn');
+  try {
+    const transcriptUrl = `https://www.youtube.com/api/timedtext?lang=en&v=${videoId}`;
+    const proxy = `https://corsproxy.io/?${encodeURIComponent(transcriptUrl)}`;
+    const resp = await fetch(proxy);
+    const xml = await resp.text();
+    const xmlDoc = new DOMParser().parseFromString(xml, 'text/xml');
+    const texts = Array.from(xmlDoc.querySelectorAll('text'));
+    if (!texts.length) throw new Error('No English transcript found');
+    const transcript = texts.map(t => t.textContent.replace(/&#39;/g,"'").replace(/&amp;/g,'&')).join(' ').replace(/\s+/g,' ').trim();
+    await addDoc(`YouTube: ${videoId}`, transcript);
+    document.getElementById('ytInput').value = '';
+    showAlert('âœ“ Transcript ingested!', 'warn');
+  } catch(e) {
+    showAlert(`âœ— ${e.message}`, 'error');
+  }
+}
+
+async function extractPdfText(file) {
+  const pdfjsLib = window['pdfjs-dist/build/pdf'];
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  let fullText = '';
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    const pageText = content.items.map(item => item.str).join(' ');
+    fullText += pageText + '\n\n';
+  }
+  return fullText.trim();
+}
+
+// ============================================================
+// CSV / TSV ENGINE â€” Smart tabular data ingestion
+// Handles large files via smart sampling + schema-aware chunking.
+// ============================================================
+
+// Fast CSV parser: split-based (no quoted newlines â€” covers 99% of data files)
+function parseCsvFast(text, sep) {
+  const lines = text.split('\n');
+  const result = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trimEnd();
+    if (!line) continue;
+    // Handle CRLF
+    result.push(line.endsWith('\r') ? line.slice(0, -1).split(sep) : line.split(sep));
+  }
+  return result;
+}
+
+// Full CSV parser: handles quoted fields with embedded commas/newlines (slower, used as fallback)
+function parseCsvFull(text, sep) {
+  const result = [];
+  let row = [], cur = '', inQ = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '"') {
+      if (inQ && text[i + 1] === '"') { cur += '"'; i++; }
+      else inQ = !inQ;
+    } else if (ch === sep && !inQ) {
+      row.push(cur); cur = '';
+    } else if ((ch === '\n' || ch === '\r') && !inQ) {
+      if (ch === '\r' && text[i + 1] === '\n') i++;
+      row.push(cur); cur = '';
+      if (row.some(v => v.trim())) result.push(row);
+      row = [];
+    } else {
+      cur += ch;
+    }
+  }
+  if (cur || row.length) { row.push(cur); if (row.some(v => v.trim())) result.push(row); }
+  return result;
+}
+
+// Auto-select parser: use fast path unless file contains quoted fields with embedded separators
+function parseCsvText(text, sep = ',') {
+  // Sample first 4KB to detect if quoted fields span multiple lines
+  const sample = text.slice(0, 4096);
+  const hasMultilineQuotes = (sample.match(/"/g) || []).length > 0 &&
+    sample.split('\n').some(l => (l.match(/"/g) || []).length % 2 !== 0);
+  return hasMultilineQuotes ? parseCsvFull(text, sep) : parseCsvFast(text, sep);
+}
+
+// Detect column data types from sample values
+function detectColTypes(headers, rows) {
+  const types = {};
+  headers.forEach((h, hi) => {
+    const samples = rows.slice(0, 30).map(r => (r[hi] ?? '').trim()).filter(Boolean);
+    if (!samples.length) { types[h] = 'text'; return; }
+    const numOk  = samples.filter(v => v !== '' && !isNaN(parseFloat(v)) && isFinite(Number(v))).length;
+    const dateOk = samples.filter(v => /^\d{4}-\d{2}-\d{2}/.test(v) || /^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}/.test(v)).length;
+    if (numOk  / samples.length > 0.8) types[h] = 'numeric';
+    else if (dateOk / samples.length > 0.8) types[h] = 'date';
+    else types[h] = 'text';
+  });
+  return types;
+}
+
+// Generate per-column statistics for the summary chunk
+function buildColStats(headers, rows, colTypes) {
+  return headers.map((h, hi) => {
+    const vals = rows.map(r => (r[hi] ?? '').trim()).filter(Boolean);
+    const type = colTypes[h];
+    if (type === 'numeric') {
+      const nums = vals.map(Number).filter(n => !isNaN(n));
+      if (!nums.length) return `  ${h} (numeric): no data`;
+      // Use reduce â€” spread (Math.min(...nums)) stack-overflows on large arrays
+      let min = nums[0], max = nums[0], sum = 0;
+      for (const n of nums) { if (n < min) min = n; if (n > max) max = n; sum += n; }
+      const avg = sum / nums.length;
+      const fmt = n => n.toLocaleString(undefined, { maximumFractionDigits: 4 });
+      return `  ${h} (numeric): min=${fmt(min)}, max=${fmt(max)}, avg=${fmt(avg)}`;
+    } else if (type === 'date') {
+      const sorted = [...vals].sort();
+      return `  ${h} (date): ${sorted[0]} â†’ ${sorted[sorted.length-1]}, ${new Set(vals).size.toLocaleString()} unique`;
+    } else {
+      const uniq = new Set(vals);
+      const sample = [...uniq].slice(0, 6).join(', ');
+      return `  ${h} (categorical): ${uniq.size.toLocaleString()} unique â€” e.g. ${sample}`;
+    }
+  }).join('\n');
+}
+
+// Schema + statistics summary (always the first chunk)
+function buildCsvSummaryChunk(fileName, headers, rows, colTypes, totalRows, wasSampled) {
+  const stats = buildColStats(headers, rows, colTypes);
+  const sampleNote = wasSampled
+    ? `\nâš  Large file: ${totalRows.toLocaleString()} total rows â€” indexed a representative sample of ${rows.length.toLocaleString()} rows (first 500, last 500, random middle sample).`
+    : '';
+  return [
+    `[DATASET SCHEMA: ${fileName}]`,
+    `Total rows: ${totalRows.toLocaleString()} | Columns: ${headers.length}`,
+    `Column names: ${headers.join(', ')}`,
+    ``,
+    `Column statistics:`,
+    stats,
+    sampleNote,
+  ].filter(l => l !== undefined).join('\n');
+}
+
+// Convert a batch of rows to a readable text block
+function rowBatchToText(headers, rows, fileName, batchStart, sampledTotal) {
+  const header = `[${fileName} | Rows ${batchStart + 1}â€“${batchStart + rows.length} of ${sampledTotal}]`;
+  const lines = rows.map(row =>
+    headers.map((h, i) => `${h}: ${(row[i] ?? '').trim()}`).join(' | ')
+  );
+  return header + '\n' + lines.join('\n');
+}
+
+// Smart row sampling for large CSVs â€” keeps first/last + random middle
+function smartSampleRows(rows, targetRows = 3000) {
+  if (rows.length <= targetRows) return rows;
+  const headN = 500, tailN = 500, midN = targetRows - headN - tailN;
+  const head = rows.slice(0, headN);
+  const tail = rows.slice(-tailN);
+  const mid  = rows.slice(headN, rows.length - tailN);
+  const step = Math.max(1, Math.ceil(mid.length / midN));
+  const midSample = mid.filter((_, i) => i % step === 0).slice(0, midN);
+  return [...head, ...midSample, ...tail];
+}
+
+function buildTableMeta(fileName, headers, dataRows, colTypes, extra = {}) {
+  const headerIndex = {};
+  headers.forEach((h, i) => { headerIndex[h] = i; });
+  return {
+    kind: 'table',
+    name: fileName,
+    headers,
+    headerIndex,
+    rows: dataRows,
+    colTypes,
+    totalRows: dataRows.length,
+    sampleRows: dataRows.slice(0, Math.min(5, dataRows.length)),
+    ...extra
+  };
+}
+
+// Main CSV extraction function â€” returns a plain text string ready for addDoc()
+async function extractCsvData(file) {
+  const isTsv = file.name.toLowerCase().endsWith('.tsv');
+  const sep   = isTsv ? '\t' : ',';
+  const raw   = await file.text();
+
+  showAlert(`Parsing ${isTsv ? 'TSV' : 'CSV'}: ${file.name}â€¦`, 'warn');
+  const allRows = parseCsvText(raw, sep);
+  if (allRows.length < 2) throw new Error('File appears empty or has only headers');
+
+  const headers   = allRows[0].map(h => h.trim());
+  const dataRows  = allRows.slice(1);
+  const totalRows = dataRows.length;
+  const colTypes  = detectColTypes(headers, dataRows);
+
+  // Sample if large
+  const LARGE = 5000, TARGET_SAMPLE = 3000;
+  const wasSampled = totalRows > LARGE;
+  const sampledRows = wasSampled ? smartSampleRows(dataRows, TARGET_SAMPLE) : dataRows;
+
+  // Build all chunk texts
+  const ROWS_PER_CHUNK = 50;
+  const parts = [];
+
+  // 1. Schema summary chunk (always first)
+  parts.push(buildCsvSummaryChunk(file.name, headers, sampledRows, colTypes, totalRows, wasSampled));
+
+  // 2. Row batch chunks
+  for (let i = 0; i < sampledRows.length; i += ROWS_PER_CHUNK) {
+    const batch = sampledRows.slice(i, i + ROWS_PER_CHUNK);
+    parts.push(rowBatchToText(headers, batch, file.name, i, sampledRows.length));
+  }
+
+  return {
+    text: parts.join('\n\n---\n\n'),
+    totalRows,
+    sampledRows: sampledRows.length,
+    colCount: headers.length,
+    wasSampled,
+    chunkCount: parts.length,
+    table: buildTableMeta(file.name, headers, dataRows, colTypes, {
+      sampledRows: sampledRows.length,
+      sampled: wasSampled,
+      fileType: isTsv ? 'tsv' : 'csv'
+    }),
+  };
+}
+
+async function extractXlsxData(file) {
+  showAlert(`Parsing XLSX: ${file.name}â€¦`, 'warn');
+  const data = await file.arrayBuffer();
+  const workbook = XLSX.read(data, { type: 'array' });
+  
+  const allSheetData = [];
+  let totalRows = 0;
+  
+  for (const sheetName of workbook.SheetNames) {
+    const sheet = workbook.Sheets[sheetName];
+    const json = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+    if (json.length > 0) {
+      allSheetData.push({ sheetName, rows: json });
+      totalRows += json.length;
+    }
+  }
+  
+  if (allSheetData.length === 0) {
+    throw new Error('No data found in spreadsheet');
+  }
+  
+  const firstSheet = allSheetData[0];
+  const headers = firstSheet.rows[0].map(h => String(h || '').trim());
+  const dataRows = firstSheet.rows.slice(1).map(row => 
+    headers.map((_, i) => row[i] !== undefined ? String(row[i]) : '')
+  );
+  
+  const colTypes = detectColTypes(headers, dataRows);
+  
+  const LARGE = 5000, TARGET_SAMPLE = 3000;
+  const wasSampled = dataRows.length > LARGE;
+  const sampledRows = wasSampled ? smartSampleRows(dataRows, TARGET_SAMPLE) : dataRows;
+  
+  const ROWS_PER_CHUNK = 50;
+  const parts = [];
+  
+  parts.push(buildCsvSummaryChunk(file.name, headers, sampledRows, colTypes, dataRows.length, wasSampled));
+  
+  if (allSheetData.length > 1) {
+    parts.push(`ðŸ“‘ Multi-sheet workbook: ${allSheetData.map(s => `"${s.sheetName}" (${s.rows.length} rows)`).join(', ')}`);
+  }
+  
+  for (let i = 0; i < sampledRows.length; i += ROWS_PER_CHUNK) {
+    const batch = sampledRows.slice(i, i + ROWS_PER_CHUNK);
+    parts.push(rowBatchToText(headers, batch, file.name, i, sampledRows.length));
+  }
+  
+  return {
+    text: parts.join('\n\n---\n\n'),
+    totalRows: dataRows.length,
+    sampledRows: sampledRows.length,
+    colCount: headers.length,
+    wasSampled,
+    chunkCount: parts.length,
+    sheetCount: allSheetData.length,
+    sheetNames: allSheetData.map(s => s.sheetName),
+    table: buildTableMeta(file.name, headers, dataRows, colTypes, {
+      sampledRows: sampledRows.length,
+      sampled: wasSampled,
+      fileType: 'xlsx',
+      sheetCount: allSheetData.length,
+      sheetNames: allSheetData.map(s => s.sheetName)
+    }),
+  };
+}
+
+async function processFiles(files) {
+  const bar = document.getElementById('progressBar');
+  const fill = document.getElementById('progressFill');
+  const pendingDocs = [];
+  bar.classList.add('visible');
+  for (let i = 0; i < files.length; i++) {
+    const f = files[i];
+    fill.style.width = `${((i + 1) / files.length) * 100}%`;
+    const ext = f.name.toLowerCase().split('.').pop();
+    let text;
+    let table = null;
+
+    if (ext === 'pdf') {
+      showAlert(`Reading PDF: ${f.name}...`, 'warn');
+      try {
+        text = await extractPdfText(f);
+        if (!text) throw new Error('No text extracted');
+      } catch(e) { showAlert(`âœ— PDF error: ${e.message}`, 'error'); continue; }
+
+    } else if (ext === 'docx') {
+      showAlert(`Reading DOCX: ${f.name}...`, 'warn');
+      try {
+        text = await extractDocxText(f);
+        if (!text) throw new Error('No text extracted');
+      } catch(e) { showAlert(`âœ— DOCX error: ${e.message}`, 'error'); continue; }
+
+    } else if (ext === 'csv' || ext === 'tsv') {
+      try {
+        const result = await extractCsvData(f);
+        text = result.text;
+        table = result.table;
+        const sampleNote = result.wasSampled ? ` (sampled ${result.sampledRows.toLocaleString()}/${result.totalRows.toLocaleString()} rows)` : '';
+        showAlert(`âœ“ ${ext.toUpperCase()}: ${result.totalRows.toLocaleString()} rows Â· ${result.colCount} cols Â· ${result.chunkCount} chunks${sampleNote}`, 'warn');
+        // Auto-switch to Data Analyst template for CSV files
+        const tmpl = document.getElementById('promptTemplate');
+        if (tmpl && tmpl.value === 'strict') tmpl.value = 'analyst';
+      } catch(e) { showAlert(`âœ— CSV error: ${e.message}`, 'error'); continue; }
+
+    } else if (ext === 'xlsx' || ext === 'xls') {
+      try {
+        const result = await extractXlsxData(f);
+        text = result.text;
+        table = result.table;
+        const sampleNote = result.wasSampled ? ` (sampled ${result.sampledRows.toLocaleString()}/${result.totalRows.toLocaleString()} rows)` : '';
+        const sheetNote = result.sheetCount > 1 ? ` Â· ${result.sheetCount} sheets` : '';
+        showAlert(`âœ“ XLSX: ${result.totalRows.toLocaleString()} rows Â· ${result.colCount} cols Â· ${result.chunkCount} chunks${sheetNote}${sampleNote}`, 'warn');
+        const tmpl = document.getElementById('promptTemplate');
+        if (tmpl && tmpl.value === 'strict') tmpl.value = 'analyst';
+      } catch(e) { showAlert(`âœ— XLSX error: ${e.message}`, 'error'); continue; }
+
+    } else {
+      text = await f.text();
+    }
+
+    pendingDocs.push({ name: f.name, text: text.trim(), table });
+    await yieldToUI();
+  }
+  if (pendingDocs.length) {
+    state.docs.push(...pendingDocs.map(doc => ({ id: crypto.randomUUID(), ...doc })));
+    await rebuildChunks();
+    renderDocList();
+    updateStats();
+  }
+  bar.classList.remove('visible');
+  fill.style.width = '0%';
+  fileInput.value = '';
+}
+
+async function addPastedText() {
+  const ta = document.getElementById('pasteText');
+  const text = ta.value.trim();
+  if (!text) { showAlert('Paste some text first.', 'warn'); return; }
+  await addDoc(`Pasted-${Date.now()}`, text);
+  ta.value = '';
+}
+
+function showAlert(msg, type = 'error') {
+  const el = document.getElementById('sideAlert');
+  el.className = `alert ${type}`;
+  el.textContent = msg;
+  setTimeout(() => { el.className = 'alert'; }, 3000);
+}
+
+// ============================================================
+// QUERY + LLM
+// ============================================================
+const PROMPT_TEMPLATES = {
+  strict:     (ctx) => `You are a precise assistant. Answer questions based ONLY on the provided context. If the answer is not in the context, say "I couldn't find this in the provided documents." Always cite which source(s) you used.\n\nContext:\n${ctx}`,
+  summarizer: (ctx) => `You are a summarization expert. Summarize the most relevant information from the context. Be concise and well-structured.\n\nContext:\n${ctx}`,
+  expert:     (ctx) => `You are a domain expert analyst. Provide a thorough, detailed answer based on the context.\n\nContext:\n${ctx}`,
+  bullets:    (ctx) => `You are a concise assistant. Always respond in bullet points. Base your answer ONLY on the context below.\n\nContext:\n${ctx}`,
+  analyst:    (ctx) => `You are a senior data analyst. The context contains tabular data (CSV/spreadsheet rows). Your job is to:
+1. Interpret the data accurately â€” treat numeric columns as numbers, dates as dates.
+2. Perform calculations or comparisons when asked (averages, totals, trends, rankings).
+3. Acknowledge when the data is sampled and may not be complete.
+4. Format results in clear tables or lists where appropriate.
+5. Never hallucinate data points â€” only use values actually present in the context.
+
+Context (tabular data):\n${ctx}`,
+};
+
+function getSystemPrompt(context) {
+  const t = document.getElementById('promptTemplate')?.value || 'strict';
+  return (PROMPT_TEMPLATES[t] || PROMPT_TEMPLATES.strict)(context);
+}
+
+function getGenParams() {
+  return {
+    temperature: parseFloat(document.getElementById('tempSlider')?.value ?? 0.7),
+    max_tokens:  parseInt(document.getElementById('maxTokens')?.value) || 1000,
+  };
+}
+
+function createStreamingMessage() {
+  const chat = document.getElementById('chatMessages');
+  const div = document.createElement('div');
+  div.className = 'message assistant';
+  div.innerHTML = `
+    <div class="message-header">
+      <span class="tag ai-tag">CLAUDE</span>
+      <div class="msg-actions"></div>
+    </div>
+    <div class="message-body"><span class="cursor-blink">â–‹</span></div>
+  `;
+  chat.appendChild(div);
+  chat.scrollTop = chat.scrollHeight;
+  return div;
+}
+
+function addCopyButton(msgEl, text) {
+  const actions = msgEl.querySelector('.msg-actions');
+  const btn = document.createElement('button');
+  btn.className = 'copy-btn';
+  btn.textContent = 'âŽ˜ Copy';
+  btn.onclick = () => {
+    navigator.clipboard.writeText(text).then(() => {
+      btn.textContent = 'âœ“ Copied';
+      setTimeout(() => { btn.textContent = 'âŽ˜ Copy'; }, 2000);
+    });
+  };
+  actions.appendChild(btn);
+}
+
+function addSources(msgEl, sources, embedUsed) {
+  const src = document.createElement('div');
+  src.className = 'sources';
+  const embedLabel = embedUsed ? 'Â· BM25 + TF-IDF + Embed' : '';
+  src.innerHTML = `<div class="sources-title">Retrieved Sources <span style="color:var(--text-dim);font-size:10px;margin-left:6px">${embedLabel}</span></div><div class="source-chips"></div>`;
+  const chips = src.querySelector('.source-chips');
+  sources.forEach(r => {
+    const chip = document.createElement('span');
+    chip.className = 'source-chip';
+    const pct = r.displayScore !== undefined ? r.displayScore : r.score;
+    const scoreColor = pct >= 0.7 ? 'var(--green)' : pct >= 0.35 ? 'var(--amber)' : 'var(--text-muted)';
+    const bar = Math.round(pct * 8);
+    const barStr = 'â–ˆ'.repeat(bar) + 'â–‘'.repeat(8 - bar);
+    chip.innerHTML = `ðŸ“„ ${r.chunk.docName} <span class="score" style="color:${scoreColor}">${(pct * 100).toFixed(0)}%</span><span style="color:var(--text-dim);font-size:9px;margin-left:4px;letter-spacing:-1px">${barStr}</span>`;
+    let peek = null;
+    chip.addEventListener('click', () => {
+      if (peek) { peek.classList.toggle('visible'); return; }
+      peek = document.createElement('div');
+      peek.className = 'context-peek visible';
+      peek.textContent = r.chunk.text;
+      chip.appendChild(peek);
+    });
+    chips.appendChild(chip);
+  });
+  msgEl.appendChild(src);
+}
+
+function addInfoBlock(msgEl, title, text) {
+  const src = document.createElement('div');
+  src.className = 'sources';
+  src.innerHTML = `<div class="sources-title">${title}</div><div class="context-peek visible" style="display:block;max-height:none">${text}</div>`;
+  msgEl.appendChild(src);
+}
+
+function normalizeFieldName(str) {
+  return (str || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+function humanizeHeader(header) {
+  return (header || '').replace(/_/g, ' ').toLowerCase();
+}
+
+function getTableDocs() {
+  return state.docs.filter(doc => doc.table?.kind === 'table');
+}
+
+function selectTableDoc(query) {
+  const docs = getTableDocs();
+  if (docs.length === 1) return docs[0];
+  const qNorm = normalizeFieldName(query);
+  return docs.find(doc => qNorm.includes(normalizeFieldName(doc.name))) || null;
+}
+
+function getMatchingHeaders(query, table, allowedTypes = null) {
+  const q = query.toLowerCase();
+  const qNorm = normalizeFieldName(query);
+  const headers = table.headers.filter(h => !allowedTypes || allowedTypes.includes(table.colTypes[h]));
+  return headers
+    .map(header => {
+      const aliases = [humanizeHeader(header), header.toLowerCase(), normalizeFieldName(header)];
+      const score = Math.max(...aliases.map(alias => {
+        if (!alias) return -1;
+        if (q.includes(alias)) return alias.length;
+        if (qNorm.includes(normalizeFieldName(alias))) return alias.length - 0.5;
+        return -1;
+      }));
+      return { header, score };
+    })
+    .filter(item => item.score >= 0)
+    .sort((a, b) => b.score - a.score)
+    .map(item => item.header);
+}
+
+function findMentionedHeader(query, table, allowedTypes = null) {
+  return getMatchingHeaders(query, table, allowedTypes)[0] || null;
+}
+
+function getFilterLabel(filters) {
+  if (!filters.length) return 'all rows';
+  return filters.map(f => {
+    if (f.type === 'between') return `${f.header} between ${f.start} and ${f.end}`;
+    if (f.type === 'year') return `${f.header} in ${f.year}`;
+    return `${f.header} = ${f.value}`;
+  }).join(', ');
+}
+
+function parseTableFilters(query, originalQuery, table) {
+  const filters = [];
+  const dateHeader = Object.keys(table.colTypes).find(h => table.colTypes[h] === 'date');
+  if (dateHeader) {
+    const between = query.match(/\b(?:between|from)\s+(\d{4}-\d{2}-\d{2})\s+(?:and|to)\s+(\d{4}-\d{2}-\d{2})\b/i);
+    if (between) filters.push({ type: 'between', header: dateHeader, start: between[1], end: between[2] });
+    const onDate = query.match(/\bon\s+(\d{4}-\d{2}-\d{2})\b/i);
+    if (onDate) filters.push({ type: 'equals', header: dateHeader, value: onDate[1] });
+    const year = query.match(/\bin\s+(20\d{2}|19\d{2})\b/i);
+    if (year) filters.push({ type: 'year', header: dateHeader, year: year[1] });
+  }
+
+  const symbolHeader = table.headers.find(h => normalizeFieldName(h) === 'symbol');
+  if (symbolHeader) {
+    const tickerRegex = /\b[A-Z]{2,5}\b/g;
+    const blocked = new Set([
+      'AVG','MAX','MIN','SUM','TOP','COUNT','ROWS','CSV','TSV','SQL','API',
+      'HTTP','HTTPS','JSON','XML','PDF','DATA','TABLE'
+    ]);
+    const tokens = originalQuery.match(tickerRegex) || [];
+    const ticker = tokens.find(t => !blocked.has(t));
+    if (ticker) filters.push({ type: 'equals', header: symbolHeader, value: ticker });
+  }
+
+  return filters;
+}
+
+function rowMatchesFilters(row, table, filters) {
+  for (const filter of filters) {
+    const idx = table.headerIndex[filter.header];
+    const val = (row[idx] ?? '').trim();
+    if (filter.type === 'equals' && val.toLowerCase() !== String(filter.value).toLowerCase()) return false;
+    if (filter.type === 'between' && (val < filter.start || val > filter.end)) return false;
+    if (filter.type === 'year' && !val.startsWith(filter.year)) return false;
+  }
+  return true;
+}
+
+function formatNumberSmart(num) {
+  if (!isFinite(num)) return 'n/a';
+  if (Math.abs(num) >= 1000) return num.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  if (Math.abs(num) >= 1) return num.toLocaleString(undefined, { maximumFractionDigits: 4 });
+  return num.toLocaleString(undefined, { maximumFractionDigits: 6 });
+}
+
+function topRowsByMetric(rows, idx, n, dir = 'desc') {
+  const best = [];
+  const better = (a, b) => dir === 'desc' ? a > b : a < b;
+  for (const row of rows) {
+    const num = Number(row[idx]);
+    if (!isFinite(num)) continue;
+    if (best.length < n) {
+      best.push({ row, value: num });
+      best.sort((a, b) => dir === 'desc' ? b.value - a.value : a.value - b.value);
+    } else if (better(num, best[best.length - 1].value)) {
+      best[best.length - 1] = { row, value: num };
+      best.sort((a, b) => dir === 'desc' ? b.value - a.value : a.value - b.value);
+    }
+  }
+  return best;
+}
+
+function parseIsoDate(value) {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const dt = new Date(`${value}T00:00:00Z`);
+  return Number.isNaN(dt.getTime()) ? null : dt;
+}
+
+function ageOnDate(birthStr, endStr = null) {
+  const birth = parseIsoDate(birthStr);
+  if (!birth) return null;
+  const end = parseIsoDate(endStr) || new Date();
+  let age = end.getUTCFullYear() - birth.getUTCFullYear();
+  const beforeBirthday =
+    end.getUTCMonth() < birth.getUTCMonth() ||
+    (end.getUTCMonth() === birth.getUTCMonth() && end.getUTCDate() < birth.getUTCDate());
+  if (beforeBirthday) age--;
+  return age;
+}
+
+function runTableQuery(doc, query) {
+  const table = doc.table;
+  const q = query.toLowerCase();
+  const headers = table.headers;
+  const numericHeaders = headers.filter(h => table.colTypes[h] === 'numeric');
+  const mentionedNumeric = findMentionedHeader(query, table, ['numeric']);
+  const mentionedAny = findMentionedHeader(query, table);
+  const filters = parseTableFilters(query, query, table);
+  const groupBy = headers.find(h => q.includes(`by ${humanizeHeader(h)}`) || q.includes(`per ${humanizeHeader(h)}`) || q.includes(`for each ${humanizeHeader(h)}`)) || null;
+  const topNMatch = q.match(/\btop\s+(\d+)\b/);
+  const topN = Math.min(parseInt(topNMatch?.[1] || '10', 10), 25);
+  const wantsOverview = /(analy[sz]e|overview|summary|summari[sz]e|describe|schema|columns)/i.test(q);
+  const wantsCount = /(how many|count|number of|total rows|records)/i.test(q);
+  const wantsUnique = /(unique|distinct)/i.test(q);
+  const wantsTrend = /\b(trend|trends|pattern|patterns|distribution|breakdown)\b/i.test(q);
+  const wantsAverage = /\b(average|avg|mean)\b/i.test(q);
+  const wantsSum = /\b(sum|total)\b/i.test(q) && !wantsCount;
+  const wantsMax = /\b(highest|maximum|max|largest)\b/i.test(q);
+  const wantsMin = /\b(lowest|minimum|min|smallest)\b/i.test(q);
+  const wantsTopRows = /\b(top|highest|lowest)\b/i.test(q) && /\b(row|rows|record|records|day|days|date)\b/i.test(q);
+  const wantsAge = /\bage\b|\bages\b|\bminor\b|\bminors\b|\bunder 18\b|\bbelow 18\b|\byounger than 18\b/i.test(q);
+  const birthHeader = headers.find(h => normalizeFieldName(h) === 'birthdate');
+  const deathHeader = headers.find(h => normalizeFieldName(h) === 'deathdate');
+
+  const filteredRows = table.rows.filter(row => rowMatchesFilters(row, table, filters));
+  const filterLabel = getFilterLabel(filters);
+
+  if (!filteredRows.length) {
+    return { handled: true, answer: `No rows matched the requested filters in ${doc.name}.`, meta: `Structured table query on ${doc.name}` };
+  }
+
+  if (wantsAge && birthHeader) {
+    const birthIdx = table.headerIndex[birthHeader];
+    const deathIdx = deathHeader ? table.headerIndex[deathHeader] : -1;
+    const ages = [];
+    let minors = 0;
+    let adults = 0;
+    let deceased = 0;
+    for (const row of filteredRows) {
+      const deathVal = deathIdx >= 0 ? row[deathIdx] : '';
+      const age = ageOnDate(row[birthIdx], deathVal);
+      if (age === null) continue;
+      ages.push(age);
+      if (age < 18) minors++;
+      else adults++;
+      if (deathVal && String(deathVal).trim()) deceased++;
+    }
+    if (!ages.length) {
+      return { handled: true, answer: `No usable birth dates were found in ${doc.name}.`, meta: `Structured table query on ${doc.name}` };
+    }
+
+    let minAge = ages[0], maxAge = ages[0], sumAge = 0;
+    for (const age of ages) {
+      if (age < minAge) minAge = age;
+      if (age > maxAge) maxAge = age;
+      sumAge += age;
+    }
+
+    if (/\bminor\b|\bminors\b|\bunder 18\b|\bbelow 18\b|\byounger than 18\b/i.test(q)) {
+      return {
+        handled: true,
+        answer: [
+          `Patients below age 18: ${minors.toLocaleString()}`,
+          `Adults 18 and over: ${adults.toLocaleString()}`,
+          `Dataset: ${doc.name}`,
+          `Scope: ${filterLabel}`
+        ].join('\n'),
+        meta: `Structured table query on ${doc.name}`
+      };
+    }
+
+    if (wantsTrend) {
+      const preferred = ['gender', 'race', 'ethnicity', 'marital', 'city', 'state', 'county'];
+      const categorical = preferred
+        .map(name => headers.find(h => normalizeFieldName(h) === name))
+        .filter(Boolean)
+        .slice(0, 4);
+      const lines = [
+        `Trend summary for ${doc.name}`,
+        `Rows: ${filteredRows.length.toLocaleString()} | Scope: ${filterLabel}`,
+        `Age: min ${minAge}, max ${maxAge}, avg ${formatNumberSmart(sumAge / ages.length)}`,
+        `Minors: ${minors.toLocaleString()} | Adults: ${adults.toLocaleString()} | Deceased with recorded death date: ${deceased.toLocaleString()}`,
+        ''
+      ];
+
+      categorical.forEach(header => {
+        const idx = table.headerIndex[header];
+        const counts = new Map();
+        for (const row of filteredRows) {
+          const key = (row[idx] ?? '').trim() || '(blank)';
+          counts.set(key, (counts.get(key) || 0) + 1);
+        }
+        const top = Array.from(counts.entries())
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 5)
+          .map(([key, count]) => `${key}: ${count.toLocaleString()}`)
+          .join(', ');
+        lines.push(`${header}: ${top || 'n/a'}`);
+      });
+
+      lines.push('');
+      lines.push('Ask a follow-up like "gender breakdown", "patients by city", or "how many minors".');
+      return {
+        handled: true,
+        answer: lines.join('\n'),
+        meta: `Structured table query on ${doc.name}`
+      };
+    }
+
+    return {
+      handled: true,
+      answer: [
+        `Age summary for ${doc.name}`,
+        `Rows used: ${ages.length.toLocaleString()}`,
+        `Scope: ${filterLabel}`,
+        `Minimum age: ${minAge}`,
+        `Maximum age: ${maxAge}`,
+        `Average age: ${formatNumberSmart(sumAge / ages.length)}`,
+        `Minors: ${minors.toLocaleString()} | Adults: ${adults.toLocaleString()}`
+      ].join('\n'),
+      meta: `Structured table query on ${doc.name}`
+    };
+  }
+
+  if (wantsTrend && !mentionedNumeric && !groupBy) {
+    const categorical = headers.filter(h => table.colTypes[h] !== 'numeric').slice(0, 3);
+    const numeric = numericHeaders.slice(0, 3);
+    const lines = [
+      `Trend summary for ${doc.name}`,
+      `Rows: ${filteredRows.length.toLocaleString()} | Scope: ${filterLabel}`,
+      ''
+    ];
+
+    categorical.forEach(header => {
+      const idx = table.headerIndex[header];
+      const counts = new Map();
+      for (const row of filteredRows) {
+        const key = (row[idx] ?? '').trim() || '(blank)';
+        counts.set(key, (counts.get(key) || 0) + 1);
+      }
+      const top = Array.from(counts.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([key, count]) => `${key}: ${count.toLocaleString()}`)
+        .join(', ');
+      lines.push(`Top ${header} values: ${top || 'n/a'}`);
+    });
+
+    numeric.forEach(header => {
+      const idx = table.headerIndex[header];
+      const nums = filteredRows.map(row => Number(row[idx])).filter(n => isFinite(n));
+      if (!nums.length) return;
+      let min = nums[0], max = nums[0], sum = 0;
+      for (const n of nums) {
+        if (n < min) min = n;
+        if (n > max) max = n;
+        sum += n;
+      }
+      lines.push(`${header}: min ${formatNumberSmart(min)}, max ${formatNumberSmart(max)}, avg ${formatNumberSmart(sum / nums.length)}`);
+    });
+
+    lines.push('');
+    lines.push('Ask about a specific column for deeper analysis, for example: "show trends by gender", "race breakdown", or "average close by symbol".');
+    return {
+      handled: true,
+      answer: lines.join('\n'),
+      meta: `Structured table query on ${doc.name}`
+    };
+  }
+
+  if (wantsOverview) {
+    const stats = buildColStats(headers, filteredRows, table.colTypes);
+    const sampleFlag = table.sampled
+      ? `Indexed text retrieval uses a ${table.sampledRows.toLocaleString()}-row sample, but CSV query mode is reading all ${table.totalRows.toLocaleString()} rows.`
+      : `CSV query mode is reading all ${table.totalRows.toLocaleString()} rows.`;
+    return {
+      handled: true,
+      answer: [
+        `${doc.name}`,
+        `Rows: ${table.totalRows.toLocaleString()} | Columns: ${headers.length}`,
+        `Filter scope: ${filterLabel}`,
+        `Columns: ${headers.join(', ')}`,
+        ``,
+        `Column statistics:`,
+        stats,
+        ``,
+        sampleFlag
+      ].join('\n'),
+      meta: `Structured table query on ${doc.name}`
+    };
+  }
+
+  if (wantsUnique) {
+    const target = mentionedAny || headers.find(h => table.colTypes[h] !== 'numeric') || headers[0];
+    const idx = table.headerIndex[target];
+    const values = filteredRows.map(row => (row[idx] ?? '').trim()).filter(Boolean);
+    const uniq = [...new Set(values)];
+    return {
+      handled: true,
+      answer: [
+        `Unique ${target}: ${uniq.length.toLocaleString()}`,
+        `Scope: ${filterLabel}`,
+        `Examples: ${uniq.slice(0, 12).join(', ') || 'n/a'}`
+      ].join('\n'),
+      meta: `Structured table query on ${doc.name}`
+    };
+  }
+
+  if (wantsCount && !mentionedNumeric && !groupBy) {
+    return {
+      handled: true,
+      answer: [
+        `Rows matching query: ${filteredRows.length.toLocaleString()}`,
+        `Dataset: ${doc.name}`,
+        `Scope: ${filterLabel}`
+      ].join('\n'),
+      meta: `Structured table query on ${doc.name}`
+    };
+  }
+
+  const metric = mentionedNumeric || (numericHeaders.length === 1 ? numericHeaders[0] : (q.includes('price') && headers.includes('close') ? 'close' : null));
+  if (!metric && (wantsAverage || wantsSum || wantsMax || wantsMin || wantsTopRows || groupBy)) return { handled: false };
+  if (!metric) {
+    return {
+      handled: true,
+      answer: `I need a specific numeric column for that question in ${doc.name}. Try naming a field like ${numericHeaders.slice(0, 4).join(', ')}.`,
+      meta: `Structured table query on ${doc.name}`
+    };
+  }
+
+  if (groupBy) {
+    const gIdx = table.headerIndex[groupBy];
+    const mIdx = metric ? table.headerIndex[metric] : -1;
+    const groups = new Map();
+    for (const row of filteredRows) {
+      const key = (row[gIdx] ?? '').trim() || '(blank)';
+      if (!groups.has(key)) groups.set(key, { count: 0, sum: 0, min: Infinity, max: -Infinity });
+      const item = groups.get(key);
+      item.count++;
+      if (metric) {
+        const num = Number(row[mIdx]);
+        if (isFinite(num)) {
+          item.sum += num;
+          if (num < item.min) item.min = num;
+          if (num > item.max) item.max = num;
+        }
+      }
+    }
+    const rows = Array.from(groups.entries()).map(([key, item]) => {
+      let value = item.count;
+      let label = 'count';
+      if (metric) {
+        if (wantsAverage) { value = item.sum / Math.max(item.count, 1); label = `avg ${metric}`; }
+        else if (wantsSum) { value = item.sum; label = `sum ${metric}`; }
+        else if (wantsMin) { value = item.min; label = `min ${metric}`; }
+        else { value = item.max; label = `max ${metric}`; }
+      }
+      return { key, value, label, count: item.count };
+    }).filter(r => isFinite(r.value));
+    rows.sort((a, b) => wantsMin ? a.value - b.value : b.value - a.value);
+    const shown = rows.slice(0, topN);
+    return {
+      handled: true,
+      answer: [
+        `${shown.length ? `Top ${shown.length}` : 'No'} ${groupBy} groups by ${shown[0]?.label || 'count'}`,
+        `Dataset: ${doc.name}`,
+        `Scope: ${filterLabel}`,
+        ``,
+        ...shown.map((r, i) => `${i + 1}. ${r.key}: ${formatNumberSmart(r.value)} (${r.count.toLocaleString()} rows)`)
+      ].join('\n'),
+      meta: `Structured table query on ${doc.name}`
+    };
+  }
+
+  const metricIdx = table.headerIndex[metric];
+
+  if (wantsTopRows) {
+    const topRows = topRowsByMetric(filteredRows, metricIdx, topN, wantsMin ? 'asc' : 'desc');
+    const cols = headers.filter(h => ['symbol', 'date', normalizeFieldName(metric)].includes(normalizeFieldName(h))).slice(0, 4);
+    const displayCols = cols.length ? cols : headers.slice(0, Math.min(4, headers.length));
+    return {
+      handled: true,
+      answer: [
+        `${wantsMin ? 'Lowest' : 'Highest'} ${topRows.length} rows by ${metric}`,
+        `Dataset: ${doc.name}`,
+        `Scope: ${filterLabel}`,
+        ``,
+        ...topRows.map((item, i) => `${i + 1}. ${displayCols.map(h => `${h}: ${(item.row[table.headerIndex[h]] ?? '').trim()}`).join(' | ')}`)
+      ].join('\n'),
+      meta: `Structured table query on ${doc.name}`
+    };
+  }
+
+  let count = 0, sum = 0, min = Infinity, max = -Infinity, minRow = null, maxRow = null;
+  for (const row of filteredRows) {
+    const num = Number(row[metricIdx]);
+    if (!isFinite(num)) continue;
+    count++;
+    sum += num;
+    if (num < min) { min = num; minRow = row; }
+    if (num > max) { max = num; maxRow = row; }
+  }
+  if (!count) return { handled: true, answer: `No numeric values found for ${metric} in ${doc.name}.`, meta: `Structured table query on ${doc.name}` };
+
+  if (wantsAverage || wantsSum || wantsMax || wantsMin) {
+    const mode = wantsAverage ? 'Average' : wantsSum ? 'Total' : wantsMin ? 'Minimum' : 'Maximum';
+    const value = wantsAverage ? (sum / count) : wantsSum ? sum : wantsMin ? min : max;
+    const symbolHeader = headers.find(h => normalizeFieldName(h) === 'symbol');
+    const dateHeader = headers.find(h => normalizeFieldName(h) === 'date');
+    const refRow = wantsMin ? minRow : maxRow;
+    const refs = [];
+    if (refRow && symbolHeader) refs.push(`${symbolHeader}: ${refRow[table.headerIndex[symbolHeader]]}`);
+    if (refRow && dateHeader) refs.push(`${dateHeader}: ${refRow[table.headerIndex[dateHeader]]}`);
+    return {
+      handled: true,
+      answer: [
+        `${mode} ${metric}: ${formatNumberSmart(value)}`,
+        `Dataset: ${doc.name}`,
+        `Scope: ${filterLabel}`,
+        `Rows used: ${count.toLocaleString()}`,
+        refs.length ? `Reference row: ${refs.join(' | ')}` : ''
+      ].filter(Boolean).join('\n'),
+      meta: `Structured table query on ${doc.name}`
+    };
+  }
+
+  return { handled: false };
+}
+
+function maybeRunStructuredTableQuery(query) {
+  const doc = selectTableDoc(query);
+  if (!doc) return { handled: false };
+  const q = query.trim().toLowerCase();
+  const smallTalk = /^(hi|hello|hey|yo|sup|thanks|thank you|ok|okay)$/i.test(q);
+  if (smallTalk) return { handled: false };
+
+  const analysisIntent = /(how many|count|number of|total|average|avg|mean|sum|highest|max|largest|lowest|min|smallest|top|trend|trends|pattern|patterns|distribution|breakdown|unique|distinct|summary|summarize|summarise|overview|describe|schema|columns|analy[sz]e|access|all data|entire dataset|full dataset|all rows|all patients)/i.test(q);
+  if (!analysisIntent) return { handled: false };
+
+  if (/\b(access|all data|entire dataset|full dataset|all rows|all patients)\b/i.test(q)) {
+    const rowLabel = /patient/i.test(doc.name) ? 'patients' : 'rows';
+    return {
+      handled: true,
+      answer: `Yes. ${doc.name} is loaded with ${doc.table.totalRows.toLocaleString()} ${rowLabel}, and CSV query mode can access the full table, not just retrieved slices.`,
+      meta: `Structured table query on ${doc.name}`
+    };
+  }
+
+  return runTableQuery(doc, query);
+}
+
+const CTX_TOKEN_BUDGET = 3000;
+const CTX_MIN_MESSAGES = 2;
+
+function smartTrimHistory(history, budget) {
+  if (!history.length) return [];
+  let tokens = 0;
+  let cutIdx = history.length;
+  for (let i = history.length - 1; i >= 0; i--) {
+    const t = estimateTokens(history[i].content);
+    if (tokens + t > budget && history.length - i >= CTX_MIN_MESSAGES) break;
+    tokens += t;
+    cutIdx = i;
+  }
+  const trimmed = history.slice(cutIdx);
+  state.session.lastHistoryTrimmed = history.length - trimmed.length;
+  return trimmed;
+}
+
+async function sendQuery() {
+  if (state.isSending) return;
+  const input = document.getElementById('queryInput');
+  const sendBtn = document.getElementById('sendBtn');
+  const query = input.value.trim();
+  if (!query) return;
+  if (state.chunks.length === 0) { showAlert('No documents loaded.', 'warn'); return; }
+
+  state.isSending = true;
+  if (sendBtn) sendBtn.disabled = true;
+  input.value = '';
+  resizeTextarea(input);
+  hideWelcome();
+  appendMessage('user', query);
+  state.chatHistory.push({ role: 'user', content: query });
+
+  const msgEl = createStreamingMessage();
+  const bodyEl = msgEl.querySelector('.message-body');
+  const chat = document.getElementById('chatMessages');
+
+  try {
+    const structured = maybeRunStructuredTableQuery(query);
+    if (structured.handled) {
+      bodyEl.innerHTML = formatText(structured.answer);
+      addCopyButton(msgEl, structured.answer);
+      addInfoBlock(msgEl, 'CSV Query Mode', structured.meta);
+      state.chatHistory.push({ role: 'assistant', content: structured.answer });
+      state.session.tableQueries += 1;
+      renderCostTracker();
+      return;
+    }
+
+    const backendResp = await callBackendQuery(query);
+    if (backendResp) {
+      const { answer, results, debug, latency } = backendResp;
+      bodyEl.innerHTML = formatText(answer);
+      addCopyButton(msgEl, answer);
+      if (results && results.length > 0) addSources(msgEl, results, debug?.vectorUsed);
+      state.chatHistory.push({ role: 'assistant', content: answer });
+
+      const inputEst = estimateTokens(query + JSON.stringify(results));
+      const outputEst = estimateTokens(answer);
+      trackCost(inputEst, outputEst);
+
+      if (state.debugMode && debug) renderDebugPanel(msgEl, debug, inputEst, outputEst);
+      return;
+    }
+
+    const k = parseInt(document.getElementById('topK').value) || 4;
+    const { results, debug } = await retrieve(query, k);
+    const context = results.map((r, i) => `[Source ${i + 1}: ${r.chunk.docName}]\n${r.chunk.text}`).join('\n\n---\n\n');
+    const systemPrompt = getSystemPrompt(context);
+    const trimmedHistory = smartTrimHistory(state.chatHistory, CTX_TOKEN_BUDGET);
+    const inputText = systemPrompt + trimmedHistory.map(m => m.content).join(' ');
+    const inputEstimate = estimateTokens(inputText);
+
+    let fullAnswer = '';
+    const onToken = (token, full) => {
+      fullAnswer = full;
+      bodyEl.innerHTML = formatText(full) + '<span class="cursor-blink">â–‹</span>';
+      chat.scrollTop = chat.scrollHeight;
+    };
+
+    if (currentBackend === 'cloud') {
+      fullAnswer = await callCloudStream(systemPrompt, trimmedHistory, onToken);
+    } else {
+      fullAnswer = await callOllamaStream(systemPrompt, trimmedHistory, onToken);
+    }
+
+    bodyEl.innerHTML = formatText(fullAnswer);
+    addCopyButton(msgEl, fullAnswer);
+    if (results.length > 0) addSources(msgEl, results, debug?.embedUsed);
+    state.chatHistory.push({ role: 'assistant', content: fullAnswer });
+
+    const outputEstimate = estimateTokens(fullAnswer);
+    trackCost(inputEstimate, outputEstimate);
+
+    if (state.debugMode && debug) renderDebugPanel(msgEl, debug, inputEstimate, outputEstimate);
+
+  } catch (err) {
+    let hint;
+    if (currentBackend === 'local') {
+      const isFileProtocol = location.protocol === 'file:';
+      hint = (err.message.includes('fetch') || err.message.includes('Failed'))
+        ? (isFileProtocol ? 'CORS blocked â€" serve from localhost' : 'Make sure Ollama is running')
+        : `Ollama error â€" check model is loaded (ollama list).`;
+    } else {
+      hint = 'Make sure your cloud API key is set correctly.';
+    }
+    bodyEl.innerHTML = formatText(`âš  Error: ${err.message}.\n\n${hint}`);
+  } finally {
+    state.isSending = false;
+    if (sendBtn && state.chunks.length > 0) sendBtn.disabled = false;
+  }
+}
+
+async function callBackendQuery(query) {
+  const topK = parseInt(document.getElementById('topK').value) || 4;
+  try {
+    const resp = await fetch('https://rag-project-v7.onrender.com/query', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeaders()
+      },
+      body: JSON.stringify({
+        query,
+        topK,
+        retrievalMode: 'hybrid',
+        generation: true
+      })
+    });
+
+    if (handleAuthError(resp)) return null;
+    if (!resp.ok) return null;
+
+    const data = await resp.json();
+    return {
+      answer: data.answer || data.results?.map(r => r.chunk?.text).join('\n\n') || 'No results found.',
+      results: data.results || [],
+      debug: data.debug || null,
+      latency: data.latency || 0
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
+async function callCloudStream(systemPrompt, messages, onToken) {
+  const key = sanitizeKey(document.getElementById('cloudApiKey').value);
+  if (!key) throw new Error('No API key set.');
+  const resolved = await resolveCloudConfig();
+  const baseUrl = resolved.baseUrl;
+  const model = resolved.model;
+  const { temperature, max_tokens } = getGenParams();
+  const resp = await fetch(`${baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+    body: JSON.stringify({ model, messages: [{ role: 'system', content: systemPrompt }, ...messages], max_tokens, temperature, stream: true })
+  });
+  if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.error?.message || `HTTP ${resp.status}`); }
+  const reader = resp.body.getReader();
+  const dec = new TextDecoder();
+  let full = '';
+  let buf = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    const lines = buf.split('\n');
+    buf = lines.pop() || '';
+    const dataLines = lines.filter(l => l.startsWith('data: '));
+    for (const line of dataLines) {
+      const d = line.slice(6);
+      if (d === '[DONE]') continue;
+      try {
+        const token = JSON.parse(d).choices?.[0]?.delta?.content || '';
+        if (token) { full += token; onToken(token, full); }
+      } catch {}
+    }
+  }
+  if (buf.startsWith('data: ')) {
+    const d = buf.slice(6);
+    if (d && d !== '[DONE]') {
+      try {
+        const token = JSON.parse(d).choices?.[0]?.delta?.content || '';
+        if (token) { full += token; onToken(token, full); }
+      } catch {}
+    }
+  }
+  return full;
+}
+
+async function callOllamaStream(systemPrompt, messages, onToken) {
+  const modelSel = document.getElementById('ollamaModel').value;
+  const model = modelSel === 'custom' ? document.getElementById('customModel').value.trim() : modelSel;
+  if (!model) {
+    throw new Error('Select a model from the dropdown or enter a custom model name');
+  }
+  const baseUrl = (document.getElementById('ollamaUrl').value.trim() || 'http://localhost:11434').replace(/\/$/, '');
+  const { temperature, max_tokens } = getGenParams();
+
+  async function tryEndpoint(endpoint, body) {
+    const resp = await fetch(`${baseUrl}${endpoint}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (!resp.ok) {
+      const errText = await resp.text().catch(() => `HTTP ${resp.status}`);
+      let errMsg = `HTTP ${resp.status}`;
+      try { errMsg = JSON.parse(errText).error || errMsg; } catch {}
+      throw new Error(`Ollama ${endpoint}: ${errMsg}`);
+    }
+    const reader = resp.body.getReader();
+    const dec = new TextDecoder();
+    let full = '', buf = '', gotAnyToken = false;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const json = JSON.parse(line);
+          if (json.error) throw new Error(json.error);
+          const token = json.message?.content || json.response || '';
+          if (token) { full += token; onToken(token, full); gotAnyToken = true; }
+        } catch(e) { if (e.message && !e.message.includes('JSON')) throw e; }
+      }
+    }
+    return { full, gotAnyToken };
+  }
+
+  let result;
+  try {
+    result = await tryEndpoint('/api/chat', {
+      model,
+      messages: [{ role: 'system', content: systemPrompt }, ...messages],
+      stream: true,
+      options: { temperature, num_predict: max_tokens }
+    });
+  } catch(chatErr) {
+    console.warn('[RAG] /api/chat failed, trying /api/generate:', chatErr.message);
+    const allContent = [systemPrompt, ...messages.map(m => `${m.role}: ${m.content}`)].join('\n\n');
+    result = await tryEndpoint('/api/generate', {
+      model,
+      prompt: allContent,
+      stream: true,
+      options: { temperature, num_predict: max_tokens }
+    });
+  }
+
+  if (!result.gotAnyToken) {
+    console.warn('[RAG] /api/chat returned empty, falling back to /api/generate');
+    const allContent = [systemPrompt, ...messages.map(m => `${m.role}: ${m.content}`)].join('\n\n');
+    result = await tryEndpoint('/api/generate', {
+      model,
+      prompt: allContent,
+      stream: true,
+      options: { temperature, num_predict: max_tokens }
+    });
+  }
+
+  if (!result.full) throw new Error(`Model "${model}" returned no content. Check it's loaded: run ollama ps`);
+  return result.full;
+}
+
+function hideWelcome() {
+  const w = document.getElementById('welcomeMsg');
+  if (w) w.remove();
+}
+
+function createWelcome() {
+  const div = document.createElement('div');
+  div.id = 'welcomeMsg';
+  div.className = 'welcome';
+  div.innerHTML = `
+    <h2>Ask anything<br/><em>from your docs</em></h2>
+    <p>Upload documents to your knowledge base, then ask questions.</p>
+    <div class="steps">
+      <div class="step"><span class="step-n">01</span><span>Upload or paste documents</span></div>
+      <div class="step"><span class="step-n">02</span><span>Docs get chunked automatically</span></div>
+      <div class="step"><span class="step-n">03</span><span>BM25 + TF-IDF + Embeddings retrieval</span></div>
+      <div class="step"><span class="step-n">04</span><span>Claude answers based on retrieved context</span></div>
+    </div>
+  `;
+  return div;
+}
+
+function appendMessage(role, text) {
+  const chat = document.getElementById('chatMessages');
+  const div = document.createElement('div');
+  div.className = `message ${role}`;
+  const tag = role === 'user' ? `<span class="tag user-tag">YOU</span>` : `<span class="tag ai-tag">CLAUDE</span>`;
+  div.innerHTML = `<div class="message-header">${tag}</div><div class="message-body">${formatText(text)}</div>`;
+  chat.appendChild(div);
+  chat.scrollTop = chat.scrollHeight;
+  return div;
+}
+
+function formatText(text) {
+  return text
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/`(.*?)`/g, '<code style="background:rgba(255,255,255,0.05);padding:1px 5px;border-radius:2px">$1</code>')
+    .replace(/\n/g, '<br/>');
+}
+
+const queryInput = document.getElementById('queryInput');
+queryInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendQuery(); }
+});
+queryInput.addEventListener('input', () => resizeTextarea(queryInput));
+
+function resizeTextarea(el) {
+  el.style.height = '44px';
+  el.style.height = Math.min(el.scrollHeight, 140) + 'px';
+}
+
+let rebuildTimer = null;
+function scheduleRebuild() {
+  clearTimeout(rebuildTimer);
+  rebuildTimer = setTimeout(() => { rebuildChunks(); }, 120);
+}
+
+document.getElementById('chunkSize').addEventListener('change', scheduleRebuild);
+document.getElementById('chunkOverlap').addEventListener('change', scheduleRebuild);
+
+// ============================================================
+// BACKEND SWITCHER
+// ============================================================
+let currentBackend = 'local';
+
+function switchBackend(mode) {
+  currentBackend = mode;
+  document.getElementById('localPanel').style.display = mode === 'local' ? 'block' : 'none';
+  document.getElementById('cloudPanel').style.display = mode === 'cloud' ? 'block' : 'none';
+  document.getElementById('tabLocal').classList.toggle('active', mode === 'local');
+  document.getElementById('tabCloud').classList.toggle('active', mode === 'cloud');
+  if (mode === 'local') {
+    termExec('ollama list');
+  }
+}
+
+document.getElementById('ollamaModel').addEventListener('change', function() {
+  document.getElementById('customModelRow').style.display = this.value === 'custom' ? 'flex' : 'none';
+});
+
+const PROVIDERS = {
+  auto:       { label: 'Auto detect', url: '', signup: '', models: [], fallbackModel: '', preferred: [] },
+  groq:       { label: 'Groq', url: 'https://api.groq.com/openai/v1', signup: 'https://console.groq.com', models: ['llama-3.1-8b-instant','llama-3.3-70b-versatile','mixtral-8x7b-32768','gemma2-9b-it'], fallbackModel: 'llama-3.1-8b-instant', preferred: ['llama-3.1-8b-instant','llama-3.3-70b-versatile','mixtral-8x7b-32768','gemma2-9b-it'] },
+  together:   { label: 'Together AI', url: 'https://api.together.xyz/v1', signup: 'https://api.together.ai', models: ['meta-llama/Llama-3.3-70B-Instruct-Turbo','google/gemma-2-9b-it','mistralai/Mixtral-8x7B-Instruct-v0.1'], fallbackModel: 'meta-llama/Llama-3.3-70B-Instruct-Turbo', preferred: ['meta-llama/Llama-3.3-70B-Instruct-Turbo','google/gemma-2-9b-it','mistralai/Mixtral-8x7B-Instruct-v0.1'] },
+  openai:     { label: 'OpenAI', url: 'https://api.openai.com/v1', signup: 'https://platform.openai.com', models: ['gpt-4o-mini','gpt-4o','gpt-3.5-turbo'], fallbackModel: 'gpt-4o-mini', preferred: ['gpt-4o-mini','gpt-4o','gpt-3.5-turbo'] },
+  openrouter: { label: 'OpenRouter', url: 'https://openrouter.ai/api/v1', signup: 'https://openrouter.ai', models: ['meta-llama/llama-3.3-70b-instruct:free','mistralai/mistral-7b-instruct:free','anthropic/claude-sonnet-4','google/gemma-3-27b-it:free'], fallbackModel: 'meta-llama/llama-3.3-70b-instruct:free', preferred: ['meta-llama/llama-3.3-70b-instruct:free','mistralai/mistral-7b-instruct:free','anthropic/claude-sonnet-4','google/gemma-3-27b-it:free'] },
+  custom:     { label: 'Custom OpenAI-compatible', url: '', signup: '', models: [], fallbackModel: '', preferred: [] }
+};
+
+const cloudState = {
+  cache: new Map(),
+  resolvedProvider: '',
+  resolvedModel: '',
+  discoveredModels: [],
+  usedFallback: false,
+  warning: '',
+  lastResolvedAt: 0
+};
+
+let cloudResolveTimer = null;
+let cloudResolveVersion = 0;
+
+function cloudStatus(text, color = 'var(--text-muted)') {
+  const el = document.getElementById('cloudResolveStatus');
+  if (!el) return;
+  el.textContent = text;
+  el.style.color = color;
+}
+
+function updateProviderSignup(providerId) {
+  const signupLink = document.getElementById('providerSignupLink');
+  const info = PROVIDERS[providerId] || PROVIDERS.auto;
+  signupLink.href = info.signup || '#';
+  signupLink.textContent = info.signup ? `â†’ Get API key at ${new URL(info.signup).hostname}` : 'â†’ Using automatic provider detection';
+}
+
+function setCloudModelOptions(models, preferred = '', placeholder = 'Auto-select after key detection') {
+  const modelSel = document.getElementById('cloudModel');
+  const current = preferred || modelSel.value;
+  const uniq = Array.from(new Set((models || []).filter(Boolean)));
+  if (uniq.length === 0) {
+    modelSel.innerHTML = `<option value="">${placeholder}</option>`;
+    return;
+  }
+  modelSel.innerHTML = uniq.map(m => `<option value="${m}">${m}</option>`).join('');
+  modelSel.value = uniq.includes(current) ? current : uniq[0];
+}
+
+function detectProviderFromKey(key) {
+  if (!key) return '';
+  if (/^sk-or-v1-/i.test(key)) return 'openrouter';
+  if (/^gsk_/i.test(key)) return 'groq';
+  if (/^sk-(proj-|svcacct-)?/i.test(key)) return 'openai';
+  if (/^(together|tg|api_)?[A-Za-z0-9_-]{24,}$/i.test(key) && !/^sk-/i.test(key)) return 'together';
+  return '';
+}
+
+function getPreferredModels(providerId) {
+  return [...(PROVIDERS[providerId]?.preferred || []), ...(PROVIDERS[providerId]?.models || [])];
+}
+
+function rankModels(models, providerId) {
+  const preferred = getPreferredModels(providerId);
+  const preferredIndex = new Map(preferred.map((m, i) => [m.toLowerCase(), i]));
+  const badHints = ['embedding', 'moderation', 'rerank', 'whisper', 'tts', 'vision-preview', 'image'];
+  const goodHints = ['chat', 'instruct', 'turbo', 'mini', 'sonnet', 'gpt', 'llama', 'gemma', 'mistral', 'claude'];
+  return [...new Set(models.filter(Boolean))].sort((a, b) => {
+    const aKey = a.toLowerCase();
+    const bKey = b.toLowerCase();
+    const aPref = preferredIndex.has(aKey) ? preferredIndex.get(aKey) : 999;
+    const bPref = preferredIndex.has(bKey) ? preferredIndex.get(bKey) : 999;
+    if (aPref !== bPref) return aPref - bPref;
+    const aBad = badHints.some(h => aKey.includes(h)) ? 1 : 0;
+    const bBad = badHints.some(h => bKey.includes(h)) ? 1 : 0;
+    if (aBad !== bBad) return aBad - bBad;
+    const aGood = goodHints.some(h => aKey.includes(h)) ? 1 : 0;
+    const bGood = goodHints.some(h => bKey.includes(h)) ? 1 : 0;
+    if (aGood !== bGood) return bGood - aGood;
+    return a.localeCompare(b);
+  });
+}
+
+function selectBestModel(providerId, discoveredModels, manualModel = '') {
+  const cleanManual = manualModel.trim();
+  const ranked = rankModels(discoveredModels, providerId);
+  if (cleanManual && ranked.includes(cleanManual)) return cleanManual;
+  if (cleanManual && providerId === 'custom') return cleanManual;
+  if (ranked.length > 0) {
+    const preferred = getPreferredModels(providerId);
+    const hit = preferred.find(m => ranked.includes(m));
+    return hit || ranked[0];
+  }
+  return cleanManual || PROVIDERS[providerId]?.fallbackModel || '';
+}
+
+async function fetchProviderModels(providerId, key, baseUrl) {
+  const cacheKey = `${providerId}|${baseUrl}|${key.slice(0, 8)}|${key.length}`;
+  if (cloudState.cache.has(cacheKey)) return cloudState.cache.get(cacheKey);
+  const resp = await fetch(`${baseUrl.replace(/\/$/, '')}/models`, {
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${key}`
+    }
+  });
+  if (!resp.ok) throw new Error(`Model discovery failed: HTTP ${resp.status}`);
+  const data = await resp.json().catch(() => ({}));
+  const raw = Array.isArray(data.data) ? data.data : Array.isArray(data.models) ? data.models : [];
+  const models = rankModels(raw.map(m => m.id || m.name || m.slug || '').filter(Boolean), providerId);
+  cloudState.cache.set(cacheKey, models);
+  return models;
+}
+
+async function resolveCloudConfig(opts = {}) {
+  const { silent = false } = opts;
+  const version = ++cloudResolveVersion;
+  const providerChoice = document.getElementById('cloudProvider').value;
+  const key = sanitizeKey(document.getElementById('cloudApiKey').value);
+  const customUrl = document.getElementById('customCloudUrl').value.trim();
+  const manualModel = providerChoice === 'custom'
+    ? document.getElementById('cloudCustomModel').value.trim()
+    : document.getElementById('cloudModel').value.trim();
+
+  if (!key) throw new Error('No API key set.');
+
+  let providerId = providerChoice;
+  let detectionLabel = 'manual';
+
+  if (providerChoice === 'auto') {
+    providerId = detectProviderFromKey(key);
+    detectionLabel = providerId ? 'auto-detected' : 'manual fallback';
+    if (!providerId) throw new Error('Could not detect the provider from this key. Pick a provider or use Custom OpenAI-compatible.');
+  }
+
+  if (providerId === 'custom' && !customUrl) {
+    throw new Error('Enter a base URL for the custom provider.');
+  }
+
+  const info = PROVIDERS[providerId];
+  const baseUrl = (providerId === 'custom' ? customUrl : info.url).replace(/\/$/, '');
+  if (!baseUrl) throw new Error('No base URL configured.');
+
+  if (!silent) cloudStatus(`Connecting to ${info.label}...`, 'var(--amber)');
+
+  let discoveredModels = [];
+  let usedFallback = false;
+  let warning = '';
+  try {
+    discoveredModels = await fetchProviderModels(providerId, key, baseUrl);
+  } catch (err) {
+    discoveredModels = [...(info.models || [])];
+    usedFallback = discoveredModels.length > 0;
+    warning = usedFallback ? `${info.label} model discovery failed; using fallback defaults.` : err.message;
+    if (!usedFallback && providerId === 'custom' && !manualModel) {
+      throw new Error('Could not discover custom provider models. Enter a model name manually.');
+    }
+  }
+
+  const model = selectBestModel(providerId, discoveredModels, manualModel);
+  if (!model) throw new Error('No model available for this provider.');
+
+  if (version === cloudResolveVersion) {
+    setCloudModelOptions(discoveredModels.length ? discoveredModels : info.models, model);
+    updateProviderSignup(providerId);
+    cloudState.resolvedProvider = providerId;
+    cloudState.resolvedModel = model;
+    cloudState.discoveredModels = discoveredModels;
+    cloudState.usedFallback = usedFallback;
+    cloudState.warning = warning;
+    cloudState.lastResolvedAt = Date.now();
+    const modeText = providerChoice === 'auto' ? `${detectionLabel}: ${info.label}` : `provider: ${info.label}`;
+    const modelText = usedFallback ? `${model} (fallback)` : model;
+    cloudStatus(`${modeText} - model: ${modelText}${warning ? ` - ${warning}` : ''}`, usedFallback ? 'var(--amber)' : 'var(--green)');
+  }
+
+  return { providerId, baseUrl, model, discoveredModels, usedFallback, warning };
+}
+
+function scheduleCloudResolve() {
+  clearTimeout(cloudResolveTimer);
+  const key = sanitizeKey(document.getElementById('cloudApiKey').value);
+  if (!key) {
+    cloudState.resolvedProvider = '';
+    cloudState.resolvedModel = '';
+    cloudState.discoveredModels = [];
+    cloudState.usedFallback = false;
+    cloudState.warning = '';
+    setCloudModelOptions([], '', 'Auto-select after key detection');
+    updateProviderSignup(document.getElementById('cloudProvider').value);
+    cloudStatus('Auto-detect waits for your API key.');
+    return;
+  }
+  cloudResolveTimer = setTimeout(() => {
+    resolveCloudConfig({ silent: true }).catch(err => {
+      cloudStatus(err.message, 'var(--red)');
+    });
+  }, 250);
+}
+
+function onProviderChange() {
+  const p = document.getElementById('cloudProvider').value;
+  const info = PROVIDERS[p] || PROVIDERS.auto;
+  const customUrlRow = document.getElementById('customUrlRow');
+  const customModelRow = document.getElementById('customModelRowCloud');
+  customUrlRow.style.display = p === 'custom' ? 'flex' : 'none';
+  customModelRow.style.display = p === 'custom' ? 'flex' : 'none';
+  if (p === 'auto') {
+    setCloudModelOptions([], '', 'Auto-select after key detection');
+  } else {
+    setCloudModelOptions(info.models, info.fallbackModel, p === 'custom' ? 'Enter model name below' : 'Select or auto-load a model');
+  }
+  updateProviderSignup(p);
+  scheduleCloudResolve();
+}
+
+function sanitizeKey(key) {
+  return key.replace(/[^\x00-\xFF]/g, '').trim();
+}
+
+document.getElementById('cloudApiKey').addEventListener('input', scheduleCloudResolve);
+document.getElementById('customCloudUrl').addEventListener('input', scheduleCloudResolve);
+document.getElementById('cloudCustomModel').addEventListener('input', scheduleCloudResolve);
+
+async function testCloud() {
+  const key = sanitizeKey(document.getElementById('cloudApiKey').value);
+  if (!key) { showAlert('Enter an API key first', 'warn'); return; }
+  showAlert('Testing...', 'warn');
+  try {
+    const resolved = await resolveCloudConfig();
+    const resp = await fetch(`${resolved.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+      body: JSON.stringify({ model: resolved.model, messages: [{ role: 'user', content: 'ping' }], max_tokens: 5 })
+    });
+    if (resp.ok) {
+      const via = resolved.usedFallback ? ` via fallback model ${resolved.model}` : ` using ${resolved.model}`;
+      showAlert(`âœ“ Cloud API connected${via}!`, 'warn');
+    }
+    else showAlert(`âœ— HTTP ${resp.status} â€” check your key/model`, 'error');
+  } catch(e) {
+    showAlert(`âœ— Connection failed: ${e.message}`, 'error');
+  }
+}
+
+onProviderChange();
+
+// ============================================================
+// TERMINAL ENGINE
+// ============================================================
+const termHistory = [];
+let termHistIdx = -1;
+
+document.getElementById('termInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); runTermCmd(); }
+  else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    termHistIdx = Math.min(termHistIdx + 1, termHistory.length - 1);
+    if (termHistory[termHistIdx]) document.getElementById('termInput').value = termHistory[termHistIdx];
+  } else if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    termHistIdx = Math.max(termHistIdx - 1, -1);
+    document.getElementById('termInput').value = termHistIdx >= 0 ? termHistory[termHistIdx] : '';
+  }
+});
+
+function termQuick(cmd) {
+  document.getElementById('termInput').value = cmd;
+  document.getElementById('termInput').focus();
+  runTermCmd();
+}
+
+function termPrint(text, cls = '') {
+  const out = document.getElementById('termOutput');
+  const line = document.createElement('div');
+  line.className = 'term-line';
+  const span = document.createElement('span');
+  span.className = `term-out ${cls}`;
+  span.textContent = text;
+  line.appendChild(span);
+  out.appendChild(line);
+  out.scrollTop = out.scrollHeight;
+}
+
+function termPrintCmd(cmd) {
+  const out = document.getElementById('termOutput');
+  const line = document.createElement('div');
+  line.className = 'term-line';
+  line.innerHTML = `<span class="term-prompt">PS&gt;</span><span class="term-cmd">${cmd}</span>`;
+  out.appendChild(line);
+  out.scrollTop = out.scrollHeight;
+}
+
+function termClear() {
+  document.getElementById('termOutput').innerHTML = '';
+}
+
+async function runTermCmd() {
+  const input = document.getElementById('termInput');
+  const cmd = input.value.trim();
+  if (!cmd) return;
+  input.value = '';
+  termHistory.unshift(cmd);
+  termHistIdx = -1;
+  termPrintCmd(cmd);
+  await termExec(cmd);
+}
+
+async function termExec(cmd) {
+  const baseUrl = (document.getElementById('ollamaUrl').value.trim() || 'http://localhost:11434').replace(/\/$/, '');
+  const parts = cmd.trim().split(/\s+/);
+  const prog = parts[0].toLowerCase();
+  const sub  = parts[1]?.toLowerCase();
+  const arg  = parts[2];
+  const isOllama = prog === 'ollama';
+  const command  = isOllama ? sub : prog;
+  const target   = isOllama ? arg : parts[1];
+
+  try {
+    if (command === 'list' || command === 'ls') {
+      const resp = await fetch(`${baseUrl}/api/tags`);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      const models = data.models || [];
+      if (models.length === 0) {
+        termPrint('No models installed. Try: ollama pull llama3.2', 'info');
+      } else {
+        termPrint('NAME                          SIZE', 'info');
+        termPrint('â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€', '');
+        models.forEach(m => {
+          const size = m.size ? (m.size / 1e9).toFixed(1) + ' GB' : '?';
+          termPrint(`${m.name.padEnd(30)}${size}`, 'model-item');
+        });
+        termPrint('', '');
+        termPrint(`${models.length} model(s) installed`, 'success');
+        const sel = document.getElementById('ollamaModel');
+        sel.innerHTML = models.map(m => `<option value="${m.name}">${m.name}</option>`).join('');
+      }
+    } else if (command === 'pull') {
+      if (!target) { termPrint('Usage: ollama pull <model>', 'error'); return; }
+      termPrint(`Pulling ${target}... (this may take a while)`, 'info');
+      const resp = await fetch(`${baseUrl}/api/pull`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: target, stream: false })
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      termPrint(`âœ“ Successfully pulled ${target}`, 'success');
+      if (target === 'claude') termPrint('  â†’ minimax-m2.7 cloud via Ollama', 'info');
+      termPrint('Running: ollama list', '');
+      await termExec('ollama list');
+    } else if (command === 'run') {
+      if (!target) { termPrint('Usage: ollama run <model>', 'error'); return; }
+      const sel = document.getElementById('ollamaModel');
+      const exists = Array.from(sel.options).some(o => o.value === target);
+      if (!exists) {
+        termPrint(`Model not found locally. Pulling first...`, 'info');
+        await termExec(`ollama pull ${target}`);
+      }
+      sel.value = target;
+      if (!sel.value) {
+        const opt = document.createElement('option');
+        opt.value = target; opt.textContent = target;
+        sel.appendChild(opt);
+        sel.value = target;
+      }
+      termPrint(`âœ“ Active model set to: ${target}`, 'success');
+      if (target === 'claude') termPrint('  â†’ minimax-m2.7:cloud is now active', 'info');
+    } else if (command === 'rm' || command === 'remove' || command === 'delete') {
+      if (!target) { termPrint('Usage: ollama rm <model>', 'error'); return; }
+      const resp = await fetch(`${baseUrl}/api/delete`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: target }) });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      termPrint(`âœ“ Deleted ${target}`, 'success');
+      await termExec('ollama list');
+    } else if (command === 'ps') {
+      const resp = await fetch(`${baseUrl}/api/ps`);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      const running = data.models || [];
+      if (running.length === 0) {
+        termPrint('No models currently loaded in memory.', 'info');
+      } else {
+        termPrint('NAME                          STATUS', 'info');
+        running.forEach(m => termPrint(`${m.name.padEnd(30)}loaded`, 'success'));
+      }
+    } else if (command === 'clear' || command === 'cls') {
+      termClear();
+    } else if (command === 'help') {
+      termPrint('Available commands:', 'info');
+      termPrint('  ollama list          â€” show installed models', '');
+      termPrint('  ollama pull <name>  â€” download a model', '');
+      termPrint('  ollama run  <name>  â€” set as active model', '');
+      termPrint('  ollama rm   <name>  â€” delete a model', '');
+      termPrint('  ollama ps            â€” show loaded models', '');
+      termPrint('  clear                â€” clear terminal', '');
+      termPrint('', '');
+      termPrint('Popular: claude, llama3.2, mistral, phi4, gemma3, qwen2.5', 'info');
+    } else if (command === 'version' || command === '--version') {
+      const resp = await fetch(`${baseUrl}/api/version`);
+      const data = await resp.json();
+      termPrint(`Ollama ${data.version || 'unknown'}`, 'success');
+    } else {
+      termPrint(`Unknown command: "${cmd}"`, 'error');
+      termPrint('Type "help" for available commands.', '');
+    }
+  } catch(e) {
+    termPrint(`âœ— ${e.message}`, 'error');
+    if (e.message.includes('fetch') || e.message.includes('Failed')) {
+      termPrint('  â†’ Is Ollama running? Try: ollama serve', '');
+      termPrint(`  â†’ Check URL: ${baseUrl}`, '');
+    }
+  }
+}
+
+// ============================================================
+// EMBEDDING INIT
+// ============================================================
+async function initEmbeddings() {
+  if (embedState.ready) { showAlert('Embedding model already loaded âœ“', 'warn'); return; }
+  if (embedState.loading) { showAlert('Model is loadingâ€¦', 'warn'); return; }
+  showAlert('Loading embedding model (~22MB)â€¦', 'warn');
+  await getEmbedPipe();
+  if (embedState.ready && state.chunks.length > 0) {
+    showAlert('Embedding chunksâ€¦', 'warn');
+    await embedChunks(state.chunks);
+    showAlert(`âœ“ Embeddings ready â€” ${state.chunks.length} chunks indexed`, 'warn');
+  }
+}
+
+// ============================================================
+// DEBUG MODE
+// ============================================================
+function toggleDebugMode() {
+  state.debugMode = !state.debugMode;
+  document.getElementById('debugToggle').classList.toggle('on', state.debugMode);
+  showAlert(state.debugMode ? 'ðŸ”¬ Debug mode ON' : 'Debug mode OFF', 'warn');
+}
+
+function renderDebugPanel(msgEl, debug, inputTok, outputTok) {
+  const panel = document.createElement('div');
+  panel.className = 'debug-panel';
+
+  const filterPct = debug.totalChunks > 0 ? Math.round((debug.prefilterPassed / debug.totalChunks) * 100) : 0;
+  const barWidth = Math.max(4, filterPct);
+
+  function scoreBar(val, max) {
+    const pct = max > 0 ? val / max : 0;
+    const filled = Math.round(pct * 8);
+    return 'â–ˆ'.repeat(filled) + 'â–‘'.repeat(8 - filled);
+  }
+
+  const bm25Max = debug.bm25Top[0]?.score || 1;
+  const tfidfMax = debug.tfidfTop[0]?.score || 1;
+
+  function scoreRows(arr, max) {
+    return arr.map((r, i) => `
+      <tr ${i === 0 ? 'class="winner"' : ''}>
+        <td class="td-doc" title="${r.docName}">${r.docName}</td>
+        <td class="td-score">${r.score.toFixed(4)}</td>
+        <td class="td-bar">${scoreBar(r.score, max)}</td>
+        <td style="color:var(--text-dim);font-size:10px">${r.chunkLen}t</td>
+      </tr>`).join('');
+  }
+
+  function fusedRows(arr) {
+    return arr.map((r, i) => `
+      <tr ${i === 0 ? 'class="winner"' : ''}>
+        <td class="td-doc" title="${r.docName}">${r.docName}</td>
+        <td class="td-score">${(r.displayScore * 100).toFixed(0)}%</td>
+        <td class="td-bar">${scoreBar(r.displayScore, 1)}</td>
+        <td style="color:var(--text-dim);font-size:9px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.chunkPreview}</td>
+      </tr>`).join('');
+  }
+
+  panel.innerHTML = `
+    <div class="debug-panel-header" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display==='none'?'flex':'none'">
+      <span>ðŸ”¬</span><span style="flex:1">Pipeline Trace</span><span class="dbg-badge">DEBUG</span>
+      <span style="color:rgba(167,139,250,0.5);font-size:9px;margin-left:8px">â–¾ toggle</span>
+    </div>
+    <div class="debug-panel-body">
+      <div>
+        <div class="debug-section-title">Query Tokens (after stopword removal)</div>
+        <div class="debug-query-tokens">
+          ${debug.queryTokens.map(t => `<span class="debug-token-chip">${t}</span>`).join('')}
+          ${debug.queryTokens.length === 0 ? '<span style="color:var(--text-dim);font-size:10px">no tokens â€” all stopwords?</span>' : ''}
+        </div>
+      </div>
+
+      <div>
+        <div class="debug-section-title">Pre-filter Pass Rate</div>
+        <div class="debug-stat-row" style="align-items:center;gap:10px">
+          <div class="debug-stat"><span class="debug-stat-label">Total Chunks</span><span class="debug-stat-val">${debug.totalChunks}</span></div>
+          <div class="debug-stat"><span class="debug-stat-label">Passed Filter</span><span class="debug-stat-val highlight">${debug.prefilterPassed}</span></div>
+          <div class="debug-stat"><span class="debug-stat-label">Pre-MMR Pool</span><span class="debug-stat-val" style="color:#34d399">${debug.preMMRCount}</span></div>
+          <div style="flex:1;display:flex;flex-direction:column;gap:4px">
+            <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--text-dim)">
+              <span>${debug.prefilterUsed ? 'âœ“ pre-filter active' : 'âš  fallback to full corpus'}</span>
+              <span style="color:#a78bfa">${filterPct}%</span>
+            </div>
+            <div class="debug-filter-bar"><div class="debug-filter-fill" style="width:${barWidth}%"></div></div>
+          </div>
+          <div class="debug-stat"><span class="debug-stat-label">~Input Tokens</span><span class="debug-stat-val">${inputTok.toLocaleString()}</span></div>
+          <div class="debug-stat"><span class="debug-stat-label">~Output Tokens</span><span class="debug-stat-val">${outputTok.toLocaleString()}</span></div>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+        <div>
+          <div class="debug-section-title">BM25 Top-5 <span style="color:var(--text-dim)">(k1=${BM25_K1} b=${BM25_B})</span></div>
+          <table class="debug-score-table"><thead><tr><th>Doc</th><th>Score</th><th>Bar</th><th>Len</th></tr></thead>
+            <tbody>${scoreRows(debug.bm25Top, bm25Max)}</tbody>
+          </table>
+        </div>
+        <div>
+          <div class="debug-section-title">TF-IDF Cosine Top-5</div>
+          <table class="debug-score-table"><thead><tr><th>Doc</th><th>Score</th><th>Bar</th><th>Len</th></tr></thead>
+            <tbody>${scoreRows(debug.tfidfTop, tfidfMax)}</tbody>
+          </table>
+        </div>
+        <div>
+          <div class="debug-section-title">
+            Embeddings Top-5
+            <span style="color:${debug.embedUsed ? 'var(--green)' : 'var(--text-dim)'}">
+              ${debug.embedUsed ? 'â— on' : 'â—‹ off'}
+            </span>
+          </div>
+          <table class="debug-score-table"><thead><tr><th>Doc</th><th>Score</th><th>Bar</th><th>Len</th></tr></thead>
+            <tbody>${debug.embedUsed && debug.embedTop.length
+              ? scoreRows(debug.embedTop, debug.embedTop[0]?.score || 1)
+              : '<tr><td colspan="4" style="color:var(--text-dim);font-size:10px;padding:8px">Click â—‹ Embeddings to load</td></tr>'
+            }</tbody>
+          </table>
+        </div>
+      </div>
+
+      <div>
+        <div class="debug-section-title">
+          RRF â†’ MMR Selected Chunks
+          <span style="color:var(--text-dim)">
+            (Î»=${MMR_LAMBDA} Â·
+            ${debug.embedUsed
+              ? `${BM25_WEIGHT*100}% BM25 + ${TFIDF_WEIGHT*100}% TF-IDF + ${EMBED_WEIGHT*100}% Embed`
+              : '65% BM25 + 35% TF-IDF'
+            } Â· k=${RRF_K})
+          </span>
+        </div>
+        <table class="debug-score-table"><thead><tr><th>Doc</th><th>Rel%</th><th>Bar</th><th>Preview</th></tr></thead>
+          <tbody>${fusedRows(debug.fusedTop)}</tbody>
+        </table>
+      </div>
+    </div>
+  `;
+  msgEl.appendChild(panel);
+  document.getElementById('chatMessages').scrollTop = 9999;
+}
+
+// ============================================================
+// TOKEN ESTIMATION + COST TRACKING
+// ============================================================
+function estimateTokens(text) {
+  return Math.ceil((text || '').length / 4);
+}
+
+const MODEL_PRICING = {
+  'gpt-4o':                    [2.50,  10.00],
+  'gpt-4o-mini':               [0.15,   0.60],
+  'gpt-3.5-turbo':             [0.50,   1.50],
+  'anthropic/claude-opus-4':   [15.00,  75.00],
+  'anthropic/claude-sonnet-4': [3.00,   15.00],
+  'anthropic/claude-haiku-3':   [0.25,   1.25],
+  'llama-3.3-70b-versatile':   [0.00,   0.00],
+  'llama-3.1-8b-instant':     [0.00,   0.00],
+  'mixtral-8x7b-32768':        [0.00,   0.00],
+  'gemma2-9b-it':              [0.00,   0.00],
+  'meta-llama/Llama-3.3-70B-Instruct-Turbo': [0.88, 0.88],
+  'mistralai/Mixtral-8x7B-Instruct-v0.1':     [0.60, 0.60],
+};
+
+function getActivePricing() {
+  let modelName = '';
+  if (currentBackend === 'cloud') {
+    const p = document.getElementById('cloudProvider').value;
+    modelName = p === 'custom' ? document.getElementById('cloudCustomModel').value.trim() : document.getElementById('cloudModel').value;
+  } else {
+    const sel = document.getElementById('ollamaModel').value;
+    modelName = sel === 'custom' ? document.getElementById('customModel').value.trim() : sel;
+  }
+  const exact = MODEL_PRICING[modelName];
+  if (exact) return { model: modelName, rates: exact };
+  const prefix = Object.keys(MODEL_PRICING).find(k => modelName.toLowerCase().includes(k.toLowerCase()));
+  return { model: modelName || 'â€”', rates: prefix ? MODEL_PRICING[prefix] : [0, 0] };
+}
+
+function trackCost(inputTokens, outputTokens) {
+  const { model, rates } = getActivePricing();
+  const inputCost  = (inputTokens  / 1_000_000) * rates[0];
+  const outputCost = (outputTokens / 1_000_000) * rates[1];
+  state.session.calls        += 1;
+  state.session.inputTokens  += inputTokens;
+  state.session.outputTokens += outputTokens;
+  state.session.inputCost    += inputCost;
+  state.session.outputCost   += outputCost;
+  state.session.cost         += inputCost + outputCost;
+  state.session.lastModel     = model;
+  renderCostTracker();
+  if (state.session.calls === 1) document.getElementById('costTracker').classList.remove('collapsed');
+}
+
+function renderCostTracker() {
+  // Null-safe helper: silently skip if element doesn't exist in DOM
+  const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+
+  const s = state.session;
+  const { model, rates } = getActivePricing();
+  const inputCost  = s.inputCost || 0;
+  const outputCost = s.outputCost || 0;
+  const total      = s.cost || 0;
+  const fmt = n => n < 0.0001 ? '<$0.0001' : '$' + n.toFixed(4);
+  const fmtTok = n => n >= 1000 ? (n / 1000).toFixed(1) + 'k' : n.toString();
+
+  set('ctModel', s.lastModel || model || 'â€”');
+  const ctModelEl = document.getElementById('ctModel');
+  if (ctModelEl) ctModelEl.title = s.lastModel || model || 'â€”';
+  set('ctCalls', s.calls);
+  set('ctTableQueries', s.tableQueries);
+  set('ctInputTok', fmtTok(s.inputTokens));
+  set('ctOutputTok', fmtTok(s.outputTokens));
+  set('ctInputCost', fmt(inputCost));
+  set('ctOutputCost', fmt(outputCost));
+  set('ctTotal2', fmt(total));
+  set('ctTotalCost', fmt(total));
+
+  const trimEl = document.getElementById('ctTrimmed');
+  if (trimEl) {
+    const n = s.lastHistoryTrimmed || 0;
+    trimEl.textContent = n > 0 ? `${n} msg${n !== 1 ? 's' : ''}` : 'â€”';
+    trimEl.style.color = n > 0 ? 'var(--amber)' : 'var(--text-dim)';
+  }
+  const isFree = s.calls > 0 && total === 0;
+  if (isFree) {
+    set('ctInputCost', 'free tier');
+    set('ctOutputCost', 'free tier');
+    set('ctTotal2', 'free tier');
+    set('ctTotalCost', 'free');
+  }
+}
+
+function toggleCostTracker() {
+  document.getElementById('costTracker').classList.toggle('collapsed');
+}
+
+function resetCostTracker() {
+  state.session = {
+    calls: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    inputCost: 0,
+    outputCost: 0,
+    cost: 0,
+    lastHistoryTrimmed: 0,
+    lastModel: ''
+  };
+  renderCostTracker();
+  showAlert('Session cost reset.', 'warn');
+}
+
+updateStats();
+</script>
+</body>
+</html>
